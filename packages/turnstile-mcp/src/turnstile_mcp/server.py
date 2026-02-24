@@ -17,14 +17,20 @@ logger = logging.getLogger(__name__)
 mcp = FastMCP("turnstile")
 
 # Engine is initialized lazily on first tool call. The project root
-# is determined from the CWD when the server starts.
+# is determined from TURNSTILE_PROJECT_DIR (if set) or CWD.
+# TURNSTILE_PROJECT_DIR is needed when `uv --directory` overrides CWD
+# to the turnstile source repo rather than the consumer project.
 _engine: Engine | None = None
 
 
 def _get_engine() -> Engine:
     global _engine
     if _engine is None:
-        project_root = Path(os.getcwd())
+        project_dir = os.environ.get("TURNSTILE_PROJECT_DIR")
+        if project_dir:
+            project_root = Path(project_dir)
+        else:
+            project_root = Path(os.getcwd())
         logger.info(f"Initializing turnstile engine at {project_root}")
         _engine = Engine(project_root)
     return _engine

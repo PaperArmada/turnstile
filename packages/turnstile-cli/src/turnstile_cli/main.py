@@ -10,6 +10,7 @@ import click
 from turnstile_core.admin import generate_mermaid, simulate_dry_run
 from turnstile_core.engine import Engine
 from turnstile_core.guard import (
+    _find_turnstile_root,
     check_enforcement,
     install_enforcement,
     run_guard,
@@ -480,6 +481,82 @@ def init_package(name: str, processes: tuple[str, ...], output: str | None) -> N
     click.echo(f"\nNext steps:")
     click.echo(f"  1. Edit the process definitions in {out_dir}/src/")
     click.echo(f"  2. Build and publish: cd {out_dir} && uv build")
+
+
+@cli.command()
+@click.option(
+    "--turnstile-dir",
+    default=None,
+    help="Path to turnstile installation (auto-detected if omitted).",
+)
+@click.pass_context
+def init(ctx: click.Context, turnstile_dir: str | None) -> None:
+    """Initialize turnstile in a project directory.
+
+    Generates .mcp.json, .processes/ directory, and registry.yaml
+    for a consumer project. Safe to run in an existing project;
+    will not overwrite existing files.
+
+    Examples:
+
+      turnstile init
+
+      turnstile init --turnstile-dir /opt/turnstile
+    """
+    root = Path(ctx.obj["project"]) if ctx.obj.get("project") else Path.cwd()
+
+    if turnstile_dir is None:
+        turnstile_dir = _find_turnstile_root()
+
+    created: list[str] = []
+
+    # .processes/ directory
+    proc_dir = root / ".processes"
+    if not proc_dir.exists():
+        proc_dir.mkdir(parents=True)
+        created.append(".processes/")
+
+    # registry.yaml
+    registry_path = proc_dir / "registry.yaml"
+    if not registry_path.exists():
+        registry_path.write_text(
+            'version: "1.0"\n\nsettings:\n  enforcement: monitor\n'
+        )
+        created.append(".processes/registry.yaml")
+
+    # .mcp.json
+    mcp_path = root / ".mcp.json"
+    if not mcp_path.exists():
+        mcp_config = {
+            "mcpServers": {
+                "turnstile": {
+                    "type": "stdio",
+                    "command": "bash",
+                    "args": [
+                        "-c",
+                        (
+                            f"TURNSTILE_PROJECT_DIR=$(pwd) "
+                            f"uv --directory {turnstile_dir} "
+                            f"run --package turnstile-mcp "
+                            f"python -m turnstile_mcp.server"
+                        ),
+                    ],
+                }
+            }
+        }
+        mcp_path.write_text(json.dumps(mcp_config, indent=2) + "\n")
+        created.append(".mcp.json")
+    else:
+        click.echo(f"  .mcp.json already exists (skipped)")
+
+    if created:
+        click.echo(f"Initialized turnstile in {root}")
+        for f in created:
+            click.echo(f"  {f}")
+        click.echo(f"\nNote: .mcp.json contains a machine-specific path.")
+        click.echo(f"Add it to .gitignore or regenerate on each machine.")
+    else:
+        click.echo("Everything already exists, nothing to do.")
 
 
 @cli.command()

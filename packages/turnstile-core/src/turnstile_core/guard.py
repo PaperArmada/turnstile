@@ -19,6 +19,21 @@ from turnstile_core.loader import load_registry
 from turnstile_core.persistence import StateStore
 
 
+def _find_turnstile_root() -> str:
+    """Find the turnstile repo root by walking up from this file.
+
+    Looks for the nearest ancestor containing both pyproject.toml
+    and a packages/ directory (the workspace layout).
+    """
+    current = Path(__file__).resolve().parent
+    while current != current.parent:
+        if (current / "pyproject.toml").exists() and (current / "packages").is_dir():
+            return str(current)
+        current = current.parent
+    # Fallback: if running via uv --directory, CWD is the turnstile repo
+    return str(Path.cwd())
+
+
 def check_enforcement(project_root: Path) -> dict[str, Any]:
     """Check enforcement status and return a hook response.
 
@@ -163,10 +178,7 @@ def install_enforcement(
         A result dict with status information.
     """
     if turnstile_dir is None:
-        # Auto-detect: guard.py is in turnstile-core, walk up to repo root
-        turnstile_dir = str(
-            Path(__file__).resolve().parent.parent.parent.parent.parent
-        )
+        turnstile_dir = _find_turnstile_root()
 
     settings_dir = project_root / ".claude"
     settings_path = settings_dir / "settings.json"

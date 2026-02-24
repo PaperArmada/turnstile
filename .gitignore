@@ -15,7 +15,8 @@ uv.lock
 # Process engine runtime state
 .process-state/
 
-# Claude Code (contains machine-specific paths from enforcement hooks)
+# Machine-specific (contains absolute paths, regenerate with `turnstile init`)
+.mcp.json
 .claude/settings.json
 
 # IDE
