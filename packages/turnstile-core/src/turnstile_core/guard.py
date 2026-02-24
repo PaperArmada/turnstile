@@ -76,9 +76,10 @@ def check_enforcement(project_root: Path) -> dict[str, Any]:
                     "hookEventName": "PreToolUse",
                     "permissionDecision": "allow",
                     "additionalContext": (
-                        "WARNING: No active turnstile process. "
-                        "Start a process with process_start before "
-                        "making changes."
+                        f"WARNING: No active turnstile process "
+                        f"(checked {project_root}). "
+                        f"Start a process with process_start before "
+                        f"making changes."
                     ),
                 }
             },
@@ -93,9 +94,9 @@ def check_enforcement(project_root: Path) -> dict[str, Any]:
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "deny",
                 "permissionDecisionReason": (
-                    "Turnstile enforcement is ON. No active process "
-                    "instance found. Start a process with process_start "
-                    "before making file changes."
+                    f"Turnstile enforcement is ON. No active process "
+                    f"instance found in {project_root}. Start a process "
+                    f"with process_start before making file changes."
                 ),
             }
         },
