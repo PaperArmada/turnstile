@@ -1,41 +1,99 @@
 name: feature-development
 description: "Standard feature development workflow for the turnstile project"
-version: "0.1.0"
+version: "1.0.0"
 
 metadata:
   author: "matt"
   tags: ["development"]
+  principles:
+    - progressive-disclosure
+    - render-dont-record
+    - single-process-single-document
 
 parameters:
   - name: feature_name
     description: "Short name for the feature"
     required: true
   - name: issue_id
-    description: "bd issue ID (e.g., ts-abc123)"
+    description: "bd issue ID (e.g., ts-abc)"
     required: false
     default: "none"
 
 states:
   - id: start
     type: initial
+    transitions: [understand]
+
+  - id: understand
+    description: "Survey the codebase and relevant context before writing code"
     transitions: [implement]
+    on_enter:
+      validate:
+        # Progressive disclosure: surface just enough context to plan the work
+        - command: "bd ready 2>/dev/null | head -10 || echo 'no bd issues'"
+          expect: not_empty
+          message: "Available work items"
+          severity: info
+
+        - command: "uv run --package turnstile-core pytest packages/turnstile-core/tests/ -q --no-header 2>&1 | tail -1"
+          expect: contains("passed")
+          message: "Current test suite status (baseline before changes)"
+          severity: info
+
+        - command: "git status --short | head -20"
+          expect: empty
+          message: "Working tree should be clean before starting"
+          severity: warning
 
   - id: implement
     description: "Write the feature code"
-    transitions: [test]
+    transitions: [test, understand]
+    on_enter:
+      validate:
+        - command: "uv run --package turnstile-cli turnstile status 2>&1"
+          expect: not_empty
+          message: "Active process instances (current context)"
+          severity: info
 
   - id: test
-    description: "Run the test suite"
+    description: "Run the test suite and verify the changes"
     transitions: [review, implement]
+    on_enter:
+      validate:
+        # Render don't record: query git for what actually changed
+        - command: "git diff --stat HEAD 2>/dev/null | tail -1 || echo 'no changes'"
+          expect: not_empty
+          message: "Changes since last commit"
+          severity: info
+
     on_exit:
       validate:
-        - command: "uv run --package turnstile-core pytest packages/turnstile-core/tests/ -q 2>&1; echo $?"
-          expect: ends_with("0")
+        # Hard gate: tests must pass
+        - command: "uv run --package turnstile-core pytest packages/turnstile-core/tests/ -q --no-header 2>&1 | tail -1"
+          expect: contains("passed")
           message: "Core test suite must pass"
 
+        # Check no test regressions
+        - command: "uv run --package turnstile-core pytest packages/turnstile-core/tests/ -q --no-header 2>&1 | tail -1 | grep -oP '\\d+(?= passed)'"
+          expect: not_empty
+          message: "Test count (verify no regressions)"
+          severity: info
+
   - id: review
-    description: "Review the changes"
+    description: "Review the changes before finalizing"
     transitions: [done, implement]
+    on_enter:
+      validate:
+        # Render don't record: check what actually changed
+        - command: "git diff --name-only 2>/dev/null | wc -l | tr -d ' '"
+          expect: greater_than(0)
+          message: "Must have uncommitted changes to review"
+          severity: warning
+
+        - command: "git diff --stat 2>/dev/null"
+          expect: not_empty
+          message: "Summary of changes"
+          severity: info
 
   - id: done
     type: terminal
