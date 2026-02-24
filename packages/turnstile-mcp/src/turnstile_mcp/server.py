@@ -258,6 +258,21 @@ async def process_diff(path_a: str, path_b: str) -> dict[str, Any]:
     return engine.diff(path_a, path_b)
 
 
+@mcp.tool()
+async def process_migrate(instance_id: str) -> dict[str, Any]:
+    """Check if an in-flight process instance needs migration.
+
+    Detects when the process definition has changed since the instance
+    was started, and reports whether the instance can continue with
+    the new definition or needs intervention.
+
+    Args:
+        instance_id: The ID of the process instance to check.
+    """
+    engine = _get_engine()
+    return engine.migrate(instance_id)
+
+
 def main():
     """Entry point for the MCP server."""
     mcp.run(transport="stdio")

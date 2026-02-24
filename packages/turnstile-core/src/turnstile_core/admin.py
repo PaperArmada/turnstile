@@ -279,6 +279,75 @@ def _serialize_hooks(hooks) -> str:
     return hooks.model_dump_json(by_alias=True)
 
 
+# ---------------------------------------------------------------------------
+# Migration
+# ---------------------------------------------------------------------------
+
+
+def check_migration(
+    instance_state: str,
+    instance_hash: str,
+    defn: ProcessDefinition,
+    current_hash: str,
+) -> dict[str, Any]:
+    """Check if an in-flight instance can migrate to a new definition version.
+
+    Args:
+        instance_state: The instance's current state ID.
+        instance_hash: The definition_hash stored in the instance.
+        defn: The current (new) process definition.
+        current_hash: The hash of the current definition file.
+
+    Returns a dict with compatibility info and migration plan.
+    """
+    result: dict[str, Any] = {
+        "hash_match": instance_hash == current_hash,
+        "current_state": instance_state,
+    }
+
+    if instance_hash == current_hash:
+        result["compatible"] = True
+        result["message"] = "Definition has not changed."
+        result["migration_needed"] = False
+        return result
+
+    result["migration_needed"] = True
+
+    # Check if current state exists in new definition
+    target = defn.get_state(instance_state)
+    if target is None:
+        result["compatible"] = False
+        result["message"] = (
+            f"State '{instance_state}' no longer exists in the definition."
+        )
+        # Suggest nearest states
+        result["suggestions"] = [
+            {
+                "action": "skip",
+                "description": f"Use process_skip to move to a state that exists in the new definition",
+                "available_states": [s.id for s in defn.states],
+            },
+            {
+                "action": "abandon",
+                "description": "Abandon this instance and start fresh with the new definition",
+            },
+        ]
+        return result
+
+    # State exists, check transitions
+    result["compatible"] = True
+    result["state_exists"] = True
+    result["available_transitions"] = target.transitions
+
+    # Check what changed
+    result["message"] = (
+        f"State '{instance_state}' exists in the updated definition. "
+        f"Instance can continue with the new version."
+    )
+
+    return result
+
+
 def _diff_summary(
     added: list[str],
     removed: list[str],

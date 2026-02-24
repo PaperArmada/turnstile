@@ -6,7 +6,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from turnstile_core.admin import diff_definitions, generate_mermaid, simulate_dry_run
+from turnstile_core.admin import (
+    check_migration,
+    diff_definitions,
+    generate_mermaid,
+    simulate_dry_run,
+)
 from turnstile_core.errors import (
     DefinitionError,
     InstanceNotFoundError,
@@ -435,6 +440,21 @@ class Engine:
         defn_a = load_definition(Path(path_a))
         defn_b = load_definition(Path(path_b))
         return diff_definitions(defn_a, defn_b)
+
+    def migrate(self, instance_id: str) -> dict[str, Any]:
+        """Check if an in-flight instance needs migration.
+
+        Compares the instance's definition_hash against the current
+        definition file and reports compatibility.
+        """
+        instance = self._store.load(instance_id)
+        defn, current_hash = self._get_definition(instance.process_name)
+        return check_migration(
+            instance.current_state,
+            instance.definition_hash,
+            defn,
+            current_hash,
+        )
 
     def validate_definition(self, path: str) -> dict[str, Any]:
         """Validate a process definition file."""
