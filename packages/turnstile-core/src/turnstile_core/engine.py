@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from turnstile_core.admin import generate_mermaid, simulate_dry_run
 from turnstile_core.errors import (
     DefinitionError,
     InstanceNotFoundError,
@@ -414,6 +415,20 @@ class Engine:
             }
             for h in instance.history
         ]
+
+    def graph(self, name: str) -> dict[str, Any]:
+        """Generate a Mermaid state diagram for a process definition."""
+        defn, _ = self._get_definition(name)
+        return generate_mermaid(defn)
+
+    def dry_run(self, name: str, path: list[str] | None = None) -> list[dict[str, Any]]:
+        """Simulate a process execution without persistence.
+
+        If path is provided, walks that specific sequence of states.
+        Otherwise, walks all states showing their configuration.
+        """
+        defn, _ = self._get_definition(name)
+        return simulate_dry_run(defn, path)
 
     def validate_definition(self, path: str) -> dict[str, Any]:
         """Validate a process definition file."""
