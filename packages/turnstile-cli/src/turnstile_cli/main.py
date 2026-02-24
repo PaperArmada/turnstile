@@ -9,6 +9,7 @@ import click
 
 from turnstile_core.engine import Engine
 from turnstile_core.loader import load_definition
+from turnstile_core.schema import export_schemas
 
 
 def _get_engine(project_root: str | None = None) -> Engine:
@@ -148,6 +149,40 @@ def dry_run(ctx: click.Context, name: str, state_path: tuple[str, ...]) -> None:
         # Show transitions for full description mode
         if "transitions" in step and step.get("transitions"):
             click.echo(f"    -> {', '.join(step['transitions'])}")
+
+
+@cli.command()
+@click.option(
+    "--output",
+    "-o",
+    default=None,
+    type=click.Path(),
+    help="Output directory (defaults to .processes/schemas/).",
+)
+@click.pass_context
+def schema(ctx: click.Context, output: str | None) -> None:
+    """Export JSON Schema files for editor autocomplete."""
+    if output:
+        out_dir = Path(output)
+    else:
+        root = Path(ctx.obj["project"]) if ctx.obj["project"] else Path.cwd()
+        out_dir = root / ".processes" / "schemas"
+
+    written = export_schemas(out_dir)
+    for name, path in written.items():
+        click.echo(f"  {name}: {path}")
+    click.echo(f"\nSchemas written to {out_dir}")
+    click.echo(
+        "\nTo enable YAML autocomplete in VS Code, add to .vscode/settings.json:"
+    )
+    click.echo(json.dumps({
+        "yaml.schemas": {
+            str(out_dir / "process-definition.schema.json"):
+                ".processes/*.yaml",
+            str(out_dir / "registry.schema.json"):
+                ".processes/registry.yaml",
+        }
+    }, indent=2))
 
 
 if __name__ == "__main__":
