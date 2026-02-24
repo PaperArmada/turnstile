@@ -8,6 +8,7 @@ from pathlib import Path
 import click
 
 from turnstile_core.engine import Engine
+from turnstile_core.hooks import generate_hook, install_hook, uninstall_hook
 from turnstile_core.loader import load_definition
 from turnstile_core.schema import export_schemas
 from turnstile_core.template import scaffold_package
@@ -184,6 +185,228 @@ def schema(ctx: click.Context, output: str | None) -> None:
                 ".processes/registry.yaml",
         }
     }, indent=2))
+
+
+@cli.command("check-completed")
+@click.argument("name")
+@click.option(
+    "--state",
+    "-s",
+    default=None,
+    help="Required state that must have been reached.",
+)
+@click.option(
+    "--parameter",
+    "-P",
+    "parameters",
+    multiple=True,
+    help="Parameter filter as key=value (repeat for multiple).",
+)
+@click.option(
+    "--include-active",
+    is_flag=True,
+    help="Also search active (in-progress) instances.",
+)
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+@click.pass_context
+def check_completed(
+    ctx: click.Context,
+    name: str,
+    state: str | None,
+    parameters: tuple[str, ...],
+    include_active: bool,
+    as_json: bool,
+) -> None:
+    """Check that a process instance was completed (for CI/hooks).
+
+    Exits 0 if a matching instance is found, 1 otherwise.
+
+    Examples:
+
+      turnstile check-completed feature-deploy --state merge
+
+      turnstile check-completed feature-deploy -P branch_name=main -s review_ready
+    """
+    engine = _get_engine(ctx.obj["project"])
+
+    # Parse key=value parameters
+    param_dict: dict[str, str] = {}
+    for p in parameters:
+        if "=" not in p:
+            click.echo(f"Invalid parameter format: '{p}' (expected key=value)", err=True)
+            raise SystemExit(1)
+        key, value = p.split("=", 1)
+        param_dict[key] = value
+
+    result = engine.check_completed(
+        process_name=name,
+        state=state,
+        parameters=param_dict or None,
+        include_active=include_active,
+    )
+
+    if as_json:
+        click.echo(json.dumps(result, indent=2))
+    else:
+        if result["passed"]:
+            click.echo(f"PASS: {result['message']}")
+            for m in result["matches"]:
+                click.echo(
+                    f"  [{m['instance_id']}] {m['status']} "
+                    f"@ {m['current_state']}"
+                )
+        else:
+            click.echo(f"FAIL: {result['message']}", err=True)
+
+    raise SystemExit(0 if result["passed"] else 1)
+
+
+@cli.group()
+def hooks() -> None:
+    """Manage git hook helpers."""
+
+
+@hooks.command("install")
+@click.argument("hook_type", type=click.Choice(["pre-push", "pre-commit"]))
+@click.option(
+    "--process",
+    "-p",
+    "processes",
+    multiple=True,
+    required=True,
+    help="Process check as 'name[:state]' (repeat for multiple).",
+)
+@click.option("--force", is_flag=True, help="Overwrite existing non-turnstile hooks.")
+@click.pass_context
+def hooks_install(
+    ctx: click.Context,
+    hook_type: str,
+    processes: tuple[str, ...],
+    force: bool,
+) -> None:
+    """Install a git hook that checks process completion.
+
+    Examples:
+
+      turnstile hooks install pre-push -p feature-deploy:merge
+
+      turnstile hooks install pre-push -p feature-deploy:merge -p release:approved
+    """
+    checks = []
+    for proc_spec in processes:
+        if ":" in proc_spec:
+            name, state = proc_spec.split(":", 1)
+            checks.append({"process": name, "state": state})
+        else:
+            checks.append({"process": proc_spec})
+
+    script = generate_hook(hook_type, checks)
+    root = Path(ctx.obj["project"]) if ctx.obj.get("project") else Path.cwd()
+    result = install_hook(hook_type, script, root, force=force)
+
+    if result.get("installed"):
+        click.echo(f"Installed {hook_type} hook at {result['path']}")
+        if result.get("replaced"):
+            click.echo("  (replaced existing turnstile hook)")
+        if result.get("backup"):
+            click.echo(f"  (backed up existing hook to {result['backup']})")
+    else:
+        click.echo(f"Failed: {result.get('error', 'unknown error')}", err=True)
+        raise SystemExit(1)
+
+
+@hooks.command("uninstall")
+@click.argument("hook_type", type=click.Choice(["pre-push", "pre-commit"]))
+@click.pass_context
+def hooks_uninstall(ctx: click.Context, hook_type: str) -> None:
+    """Remove a turnstile-generated git hook."""
+    root = Path(ctx.obj["project"]) if ctx.obj.get("project") else Path.cwd()
+    result = uninstall_hook(hook_type, root)
+
+    if result.get("removed"):
+        click.echo(f"Removed {hook_type} hook.")
+        if result.get("restored_backup"):
+            click.echo("  (restored previous hook from backup)")
+    else:
+        click.echo(f"Failed: {result.get('error', 'unknown error')}", err=True)
+        raise SystemExit(1)
+
+
+@hooks.command("show")
+@click.argument("hook_type", type=click.Choice(["pre-push", "pre-commit"]))
+@click.option(
+    "--process",
+    "-p",
+    "processes",
+    multiple=True,
+    required=True,
+    help="Process check as 'name[:state]' (repeat for multiple).",
+)
+def hooks_show(hook_type: str, processes: tuple[str, ...]) -> None:
+    """Preview a hook script without installing it."""
+    checks = []
+    for proc_spec in processes:
+        if ":" in proc_spec:
+            name, state = proc_spec.split(":", 1)
+            checks.append({"process": name, "state": state})
+        else:
+            checks.append({"process": proc_spec})
+
+    script = generate_hook(hook_type, checks)
+    click.echo(script)
+
+
+cli.add_command(hooks)
+
+
+@cli.command()
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+@click.pass_context
+def analytics(ctx: click.Context, as_json: bool) -> None:
+    """Show process analytics from archived instances."""
+    engine = _get_engine(ctx.obj["project"])
+    result = engine.analytics()
+
+    if as_json:
+        click.echo(json.dumps(result, indent=2))
+        return
+
+    if not result["processes"]:
+        click.echo("No archived instances found.")
+        return
+
+    click.echo(f"Total archived instances: {result['total_instances']}\n")
+
+    for name, stats in result["processes"].items():
+        click.echo(f"  {name}:")
+        click.echo(
+            f"    Completed: {stats['completed']}, "
+            f"Abandoned: {stats['abandoned']} "
+            f"({stats['completion_rate']:.0%} completion rate)"
+        )
+        if stats["avg_duration_seconds"] is not None:
+            dur = stats["avg_duration_seconds"]
+            if dur < 60:
+                click.echo(f"    Avg duration: {dur:.1f}s")
+            elif dur < 3600:
+                click.echo(f"    Avg duration: {dur / 60:.1f}m")
+            else:
+                click.echo(f"    Avg duration: {dur / 3600:.1f}h")
+
+        if stats["state_avg_duration_seconds"]:
+            click.echo("    Per-state avg:")
+            for state, sdur in stats["state_avg_duration_seconds"].items():
+                if sdur < 60:
+                    click.echo(f"      {state}: {sdur:.1f}s")
+                elif sdur < 3600:
+                    click.echo(f"      {state}: {sdur / 60:.1f}m")
+                else:
+                    click.echo(f"      {state}: {sdur / 3600:.1f}h")
+
+        if stats["total_overrides"]:
+            click.echo(f"    Overrides: {stats['total_overrides']}")
+            for pattern, count in stats["override_patterns"].items():
+                click.echo(f"      {pattern}: {count}x")
 
 
 @cli.command("init-package")

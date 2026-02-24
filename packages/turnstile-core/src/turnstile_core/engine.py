@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from turnstile_core.analytics import compute_analytics
 from turnstile_core.admin import (
     check_migration,
     diff_definitions,
@@ -34,6 +35,7 @@ from turnstile_core.persistence import (
     StateStore,
     _now_iso,
 )
+from turnstile_core.notifications import fire_notification
 from turnstile_core.validator import (
     ValidationResult,
     has_blocking_failures,
@@ -337,6 +339,12 @@ class Engine:
             self._store.complete(instance)
             # Check if this child completing should resume a parent
             parent_info = self._resume_parent(instance, "completed")
+            # Fire on_complete notification
+            await self._notify("on_complete", {
+                "name": instance.process_name,
+                "instance_id": instance.instance_id,
+                "state": target_state,
+            })
         else:
             self._store.save(instance)
             parent_info = None
@@ -502,6 +510,15 @@ class Engine:
             f"{override.from_state} -> {target_state} ({reason})"
         )
 
+        # Fire on_override notification
+        await self._notify("on_override", {
+            "name": instance.process_name,
+            "instance_id": instance.instance_id,
+            "step": f"{override.from_state} -> {target_state}",
+            "reason": reason,
+            "user": instance.started_by or "unknown",
+        })
+
         return TransitionResult(
             success=True,
             new_state=target_state,
@@ -643,6 +660,95 @@ class Engine:
             defn,
             current_hash,
         )
+
+    def check_completed(
+        self,
+        process_name: str,
+        state: str | None = None,
+        parameters: dict[str, str] | None = None,
+        include_active: bool = False,
+    ) -> dict[str, Any]:
+        """Check whether a matching process instance exists and reached a state.
+
+        Used by CI checks and git hooks. Returns a dict with:
+        - passed: bool
+        - matches: list of matching instances (summary)
+        - message: human-readable result
+
+        Searches completed instances by default. Set include_active=True
+        to also search active instances.
+        """
+        candidates: list[ProcessInstance] = list(self._store.list_completed())
+        if include_active:
+            candidates.extend(self._store.list_active())
+
+        # Filter by process name
+        matches = [c for c in candidates if c.process_name == process_name]
+
+        # Filter by parameters
+        if parameters:
+            filtered = []
+            for inst in matches:
+                if all(
+                    inst.parameters.get(k) == v
+                    for k, v in parameters.items()
+                ):
+                    filtered.append(inst)
+            matches = filtered
+
+        # Filter by state reached (appears in history or is current_state)
+        if state:
+            filtered = []
+            for inst in matches:
+                visited = {inst.current_state}
+                for h in inst.history:
+                    visited.add(h.from_state)
+                    visited.add(h.to_state)
+                if state in visited:
+                    filtered.append(inst)
+            matches = filtered
+
+        passed = len(matches) > 0
+        summaries = [
+            {
+                "instance_id": m.instance_id,
+                "current_state": m.current_state,
+                "status": m.status,
+                "started_at": m.started_at,
+                "updated_at": m.updated_at,
+            }
+            for m in matches
+        ]
+
+        if passed:
+            msg = f"Found {len(matches)} matching instance(s) of '{process_name}'"
+            if state:
+                msg += f" that reached '{state}'"
+        else:
+            msg = f"No matching instance of '{process_name}' found"
+            if state:
+                msg += f" that reached '{state}'"
+            if parameters:
+                param_str = ", ".join(f"{k}={v}" for k, v in parameters.items())
+                msg += f" with parameters [{param_str}]"
+
+        return {
+            "passed": passed,
+            "matches": summaries,
+            "message": msg,
+        }
+
+    async def _notify(self, event: str, context: dict[str, str]) -> None:
+        """Fire a notification if configured in registry settings."""
+        notifications = self.registry.settings.notifications
+        if notifications:
+            await fire_notification(
+                event, notifications, context, self.project_root
+            )
+
+    def analytics(self) -> dict[str, Any]:
+        """Compute process analytics from archived instances."""
+        return compute_analytics(self._store)
 
     def validate_definition(self, path: str) -> dict[str, Any]:
         """Validate a process definition file."""
