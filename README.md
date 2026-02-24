@@ -75,23 +75,27 @@ states:
     type: terminal
 ```
 
-### 2. Register the MCP server
+### 2. Set up the MCP server
 
 From your project directory, run:
 
 ```bash
-uv run --package turnstile-cli turnstile init
+uvx --python 3.12 --from "turnstile-cli @ git+https://github.com/PaperArmada/turnstile.git#subdirectory=packages/turnstile-cli" turnstile init
 ```
 
-This generates `.mcp.json`, `.processes/`, and `registry.yaml`. The `.mcp.json` contains a machine-specific path to your turnstile clone, so add it to `.gitignore` and regenerate on each machine.
+This generates everything in one step:
+- `.mcp.json` (MCP server config using uvx)
+- `.processes/registry.yaml` (monitor enforcement by default)
+- `.claude/settings.json` (guard hook)
+- `.gitignore` entries for machine-specific files
 
-If turnstile is installed elsewhere, pass `--turnstile-dir`:
+No local clone needed. Restart Claude Code and the process tools are available.
+
+**For turnstile development** (live code changes), use dev mode:
 
 ```bash
-turnstile init --turnstile-dir /opt/turnstile
+turnstile init --dev
 ```
-
-Restart Claude Code and the process tools will be available automatically.
 
 ### 3. Use the tools
 
@@ -478,6 +482,8 @@ These processes exercise the design principles documented in `docs/principles/`:
 - **Progressive disclosure**: Each state reveals only what's needed for the current step.
 - **Render don't record**: Gates compute current truth from the codebase instead of checking static assertions.
 - **Single process, single document**: Each workflow is one process definition, not split across files.
+- **Fresh install**: No hardcoded paths, portable config, self-contained defaults.
+- **Fail open**: Enforcement errors allow actions, never block.
 
 ## Project Structure
 
