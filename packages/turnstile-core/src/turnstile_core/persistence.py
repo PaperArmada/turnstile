@@ -135,7 +135,19 @@ class StateStore:
             if path.suffix == ".json" and instance_id in path.stem:
                 data = json.loads(path.read_text())
                 return ProcessInstance(**data)
-        raise InstanceNotFoundError(f"No active instance with ID '{instance_id}'")
+
+        # Check archived directories for a better error message
+        for label, archive_dir in (
+            ("completed", self.completed_dir),
+            ("abandoned", self.abandoned_dir),
+        ):
+            for path in archive_dir.rglob("*.json"):
+                if instance_id in path.stem:
+                    raise InstanceNotFoundError(
+                        f"Instance '{instance_id}' is {label} (not active)"
+                    )
+
+        raise InstanceNotFoundError(f"No instance with ID '{instance_id}'")
 
     def load_any(self, instance_id: str) -> ProcessInstance:
         """Load an instance from any directory (active, completed, abandoned).
