@@ -3,11 +3,14 @@
 from pathlib import Path
 
 import pytest
+import yaml
 
 from turnstile_core.errors import DefinitionError, ProcessNotFoundError
 from turnstile_core.loader import (
+    DiscoveredDefinition,
     definition_hash,
     discover_definitions,
+    discover_definitions_full,
     load_definition,
     load_registry,
 )
@@ -132,3 +135,196 @@ class TestDiscoverDefinitions:
         # Should find feature-deploy but not try to parse registry.yaml as a process
         assert "feature-deploy" in result
         assert len(result) == 1
+
+
+# ---------------------------------------------------------------------------
+# Extended source integration
+# ---------------------------------------------------------------------------
+
+def _make_process_yaml(directory: Path, name: str) -> None:
+    """Create a minimal valid process YAML file."""
+    data = {
+        "name": name,
+        "description": f"The {name} process",
+        "version": "1.0.0",
+        "states": [
+            {"id": "start", "type": "initial", "transitions": ["done"]},
+            {"id": "done", "type": "terminal"},
+        ],
+    }
+    (directory / f"{name}.yaml").write_text(yaml.dump(data))
+
+
+class TestDiscoverWithExtends:
+    def test_local_extends(self, tmp_path):
+        """Extended definitions from a local path are discovered."""
+        # Set up shared source
+        shared_dir = tmp_path / "shared"
+        shared_dir.mkdir()
+        _make_process_yaml(shared_dir, "release")
+
+        # Set up project with registry referencing the shared dir
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir()
+        (proc_dir / "registry.yaml").write_text(yaml.dump({
+            "version": "1.0",
+            "extends": [
+                {"source": str(shared_dir), "processes": ["release"]},
+            ],
+        }))
+
+        result = discover_definitions(tmp_path)
+        assert "release" in result
+        defn, h = result["release"]
+        assert defn.name == "release"
+
+    def test_local_overrides_extended(self, tmp_path):
+        """Local definitions take priority over extended ones."""
+        # Shared source with "deploy"
+        shared_dir = tmp_path / "shared"
+        shared_dir.mkdir()
+        _make_process_yaml(shared_dir, "deploy")
+
+        # Local "deploy" with different version
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir()
+        data = {
+            "name": "deploy",
+            "description": "Local deploy",
+            "version": "2.0.0",
+            "states": [
+                {"id": "start", "type": "initial", "transitions": ["done"]},
+                {"id": "done", "type": "terminal"},
+            ],
+        }
+        (proc_dir / "deploy.yaml").write_text(yaml.dump(data))
+        (proc_dir / "registry.yaml").write_text(yaml.dump({
+            "version": "1.0",
+            "extends": [
+                {"source": str(shared_dir), "processes": ["deploy"]},
+            ],
+        }))
+
+        result = discover_definitions(tmp_path)
+        assert "deploy" in result
+        defn, _ = result["deploy"]
+        assert defn.version == "2.0.0"  # local wins
+
+    def test_filter_restricts_processes(self, tmp_path):
+        """Only processes listed in the filter are loaded from source."""
+        shared_dir = tmp_path / "shared"
+        shared_dir.mkdir()
+        _make_process_yaml(shared_dir, "release")
+        _make_process_yaml(shared_dir, "review")
+
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir()
+        (proc_dir / "registry.yaml").write_text(yaml.dump({
+            "version": "1.0",
+            "extends": [
+                {"source": str(shared_dir), "processes": ["release"]},
+            ],
+        }))
+
+        result = discover_definitions(tmp_path)
+        assert "release" in result
+        assert "review" not in result
+
+    def test_empty_filter_loads_all(self, tmp_path):
+        """Empty process filter loads all definitions from source."""
+        shared_dir = tmp_path / "shared"
+        shared_dir.mkdir()
+        _make_process_yaml(shared_dir, "release")
+        _make_process_yaml(shared_dir, "review")
+
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir()
+        (proc_dir / "registry.yaml").write_text(yaml.dump({
+            "version": "1.0",
+            "extends": [
+                {"source": str(shared_dir), "processes": []},
+            ],
+        }))
+
+        result = discover_definitions(tmp_path)
+        assert "release" in result
+        assert "review" in result
+
+    def test_processes_subdir_in_package(self, tmp_path):
+        """Source with processes/ subdirectory is resolved correctly."""
+        pkg_dir = tmp_path / "shared-pkg"
+        proc_sub = pkg_dir / "processes"
+        proc_sub.mkdir(parents=True)
+        _make_process_yaml(proc_sub, "deploy")
+
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir()
+        (proc_dir / "registry.yaml").write_text(yaml.dump({
+            "version": "1.0",
+            "extends": [
+                {"source": str(pkg_dir), "processes": []},
+            ],
+        }))
+
+        result = discover_definitions(tmp_path)
+        assert "deploy" in result
+
+    def test_mixed_local_and_extended(self, tmp_path):
+        """Both local and extended definitions are discovered."""
+        shared_dir = tmp_path / "shared"
+        shared_dir.mkdir()
+        _make_process_yaml(shared_dir, "release")
+
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir()
+        _make_process_yaml(proc_dir, "local-process")
+        (proc_dir / "registry.yaml").write_text(yaml.dump({
+            "version": "1.0",
+            "extends": [
+                {"source": str(shared_dir), "processes": []},
+            ],
+        }))
+
+        result = discover_definitions(tmp_path)
+        assert "release" in result
+        assert "local-process" in result
+
+
+class TestDiscoverDefinitionsFull:
+    def test_returns_discovered_definitions(self, tmp_path):
+        shared_dir = tmp_path / "shared"
+        shared_dir.mkdir()
+        _make_process_yaml(shared_dir, "release")
+
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir()
+        _make_process_yaml(proc_dir, "local-deploy")
+        (proc_dir / "registry.yaml").write_text(yaml.dump({
+            "version": "1.0",
+            "extends": [
+                {"source": str(shared_dir), "processes": []},
+            ],
+        }))
+
+        result = discover_definitions_full(tmp_path)
+        assert isinstance(result["release"], DiscoveredDefinition)
+        assert result["release"].source.startswith("local:")
+        assert result["local-deploy"].source == "local"
+
+    def test_source_labels(self, tmp_path):
+        shared_dir = tmp_path / "shared"
+        shared_dir.mkdir()
+        _make_process_yaml(shared_dir, "release")
+
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir()
+        (proc_dir / "registry.yaml").write_text(yaml.dump({
+            "version": "1.0",
+            "extends": [
+                {"source": str(shared_dir), "processes": []},
+            ],
+        }))
+
+        result = discover_definitions_full(tmp_path)
+        # Source from local path should have "local:" prefix
+        assert result["release"].source.startswith("local:")
