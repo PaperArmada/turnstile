@@ -416,6 +416,19 @@ Process state is stored in `.process-state/` (add to `.gitignore`):
 
 Each instance is a JSON file containing the current state, full history, parameters, and any overrides.
 
+## Dogfooding
+
+Turnstile uses its own processes in `.processes/`:
+
+- **readme-update**: Guides README updates with audit, update, and verify states. Validation gates query the codebase (module list, MCP tool names, CLI commands) to check completeness rather than relying on self-reported checklists.
+- **feature-development**: Standard development workflow with test gates.
+
+These processes exercise the design principles documented in `docs/principles/`:
+
+- **Progressive disclosure**: Each state reveals only what's needed for the current step.
+- **Render don't record**: Gates compute current truth from the codebase instead of checking static assertions.
+- **Single process, single document**: Each workflow is one process definition, not split across files.
+
 ## Project Structure
 
 ```

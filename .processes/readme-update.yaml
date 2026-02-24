@@ -1,0 +1,84 @@
+name: readme-update
+description: "Update the project README to reflect the current state of the codebase"
+version: "1.0.0"
+
+metadata:
+  principles:
+    - progressive-disclosure
+    - render-dont-record
+    - single-process-single-document
+
+parameters:
+  - name: reason
+    description: "Why the README needs updating"
+    required: true
+
+states:
+  - id: start
+    type: initial
+    transitions: [audit]
+
+  - id: audit
+    description: "Survey the codebase to discover what the README should cover"
+    transitions: [update]
+    on_enter:
+      validate:
+        - command: "test -f README.md && echo exists || echo missing"
+          expect: equals("exists")
+          message: "README.md must exist"
+
+        # Progressive disclosure: surface just enough for the agent to
+        # understand the current codebase without overwhelming it.
+        - command: "ls packages/turnstile-core/src/turnstile_core/*.py | xargs -I{} basename {} .py | sort"
+          expect: not_empty
+          message: "Core modules"
+          severity: info
+
+        - command: "grep -oP 'async def \\K(process_\\w+)' packages/turnstile-mcp/src/turnstile_mcp/server.py | sort"
+          expect: not_empty
+          message: "MCP tools in source"
+          severity: info
+
+        - command: "uv run --package turnstile-cli turnstile --help 2>&1 | grep -A50 'Commands:'"
+          expect: not_empty
+          message: "CLI commands"
+          severity: info
+
+        - command: "uv run --package turnstile-core pytest packages/turnstile-core/tests/ -q --no-header 2>&1 | tail -1"
+          expect: contains("passed")
+          message: "Test suite status"
+          severity: info
+
+  - id: update
+    description: "Edit README.md to reflect what the audit discovered"
+    transitions: [verify, audit]
+    on_exit:
+      validate:
+        # Render don't record: check the actual git state rather than
+        # trusting the agent to say "yes I changed it".
+        - command: "git diff --name-only README.md | wc -l | tr -d ' '"
+          expect: greater_than(0)
+          message: "README.md must have uncommitted changes"
+
+  - id: verify
+    description: "Check README completeness against the actual codebase"
+    transitions: [done, update]
+    on_enter:
+      validate:
+        # Render don't record: compare source of truth (code) against
+        # README rather than asking the agent to self-certify.
+        - command: "grep -oP 'async def \\K(process_\\w+)' packages/turnstile-mcp/src/turnstile_mcp/server.py | while read tool; do grep -q \"$tool\" README.md || echo \"$tool\"; done"
+          expect: empty
+          message: "All MCP tools must be mentioned in README"
+
+        - command: "for cmd in validate list status graph dry-run schema check-completed analytics init-package; do grep -q \"turnstile $cmd\" README.md || echo \"$cmd\"; done"
+          expect: empty
+          message: "All CLI commands must appear in README"
+
+        - command: "grep -c '^## ' README.md"
+          expect: greater_than(5)
+          message: "README should have at least 6 top-level sections"
+          severity: warning
+
+  - id: done
+    type: terminal
