@@ -5,7 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from turnstile_core.admin import diff_definitions, generate_mermaid, simulate_dry_run
+from turnstile_core.admin import (
+    check_migration,
+    diff_definitions,
+    generate_mermaid,
+    simulate_dry_run,
+)
 from turnstile_core.engine import Engine
 from turnstile_core.loader import load_definition
 
@@ -222,3 +227,65 @@ class TestDiffDefinitions:
         assert result["removed_states"] == []
         assert result["modified_states"] == []
         assert result["summary"] == "no changes"
+
+
+# ---------------------------------------------------------------------------
+# Migration
+# ---------------------------------------------------------------------------
+
+
+class TestCheckMigration:
+    @pytest.fixture()
+    def defn(self):
+        return load_definition(FIXTURES / "simple.yaml")
+
+    def test_no_change(self, defn):
+        result = check_migration("working", "hash-abc", defn, "hash-abc")
+        assert result["compatible"] is True
+        assert result["migration_needed"] is False
+
+    def test_compatible_migration(self, defn):
+        result = check_migration("working", "hash-old", defn, "hash-new")
+        assert result["compatible"] is True
+        assert result["migration_needed"] is True
+        assert result["state_exists"] is True
+        assert "review" in result["available_transitions"]
+
+    def test_incompatible_state_removed(self, defn):
+        result = check_migration("deleted_state", "hash-old", defn, "hash-new")
+        assert result["compatible"] is False
+        assert result["migration_needed"] is True
+        assert "suggestions" in result
+        assert any(s["action"] == "skip" for s in result["suggestions"])
+        assert any(s["action"] == "abandon" for s in result["suggestions"])
+
+
+class TestEngineMigration:
+    @pytest.fixture()
+    def engine(self, tmp_path):
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir()
+        shutil.copy(FIXTURES / "simple.yaml", proc_dir / "simple.yaml")
+        return Engine(tmp_path)
+
+    def test_migrate_unchanged(self, engine):
+        started = engine.start("simple", {"task_name": "test"})
+        result = engine.migrate(started["instance_id"])
+        assert result["compatible"] is True
+        assert result["migration_needed"] is False
+
+    def test_migrate_after_definition_change(self, engine, tmp_path):
+        started = engine.start("simple", {"task_name": "test"})
+        iid = started["instance_id"]
+
+        # Modify the definition file (change its hash)
+        defn_path = tmp_path / ".processes" / "simple.yaml"
+        content = defn_path.read_text()
+        defn_path.write_text(content + "\n# modified\n")
+
+        # Reload so engine picks up the new hash
+        engine.reload()
+
+        result = engine.migrate(iid)
+        assert result["migration_needed"] is True
+        assert result["compatible"] is True
