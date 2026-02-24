@@ -77,25 +77,21 @@ states:
 
 ### 2. Register the MCP server
 
-Add a `.mcp.json` to your project root:
+From your project directory, run:
 
-```json
-{
-  "mcpServers": {
-    "turnstile": {
-      "type": "stdio",
-      "command": "uv",
-      "args": [
-        "--directory", "/path/to/turnstile",
-        "run", "--package", "turnstile-mcp",
-        "python", "-m", "turnstile_mcp.server"
-      ]
-    }
-  }
-}
+```bash
+uv run --package turnstile-cli turnstile init
 ```
 
-Replace `/path/to/turnstile` with the absolute path to your turnstile clone. Restart Claude Code and the process tools will be available automatically.
+This generates `.mcp.json`, `.processes/`, and `registry.yaml`. The `.mcp.json` contains a machine-specific path to your turnstile clone, so add it to `.gitignore` and regenerate on each machine.
+
+If turnstile is installed elsewhere, pass `--turnstile-dir`:
+
+```bash
+turnstile init --turnstile-dir /opt/turnstile
+```
+
+Restart Claude Code and the process tools will be available automatically.
 
 ### 3. Use the tools
 
