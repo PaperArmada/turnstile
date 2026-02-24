@@ -4,6 +4,10 @@ local:
   - feature-development
   - create-process
   - readme-update
+  - bug-fix
+  - code-review
+  - release
+  - spike
   - heist
 
 settings:

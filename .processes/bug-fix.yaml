@@ -1,0 +1,72 @@
+name: bug-fix
+description: "Structured bug fix workflow: reproduce, diagnose, fix, verify"
+version: "1.0.0"
+
+metadata:
+  author: "turnstile"
+  tags: ["starter-pack", "development"]
+  principles:
+    - progressive-disclosure
+    - render-dont-record
+    - single-process-single-document
+
+parameters:
+  - name: bug_summary
+    description: "Short description of the bug"
+    required: true
+  - name: issue_id
+    description: "Issue tracker ID"
+    required: false
+    default: "none"
+
+states:
+  - id: start
+    type: initial
+    transitions: [reproduce]
+
+  - id: reproduce
+    description: "Confirm the bug is reproducible before attempting a fix"
+    transitions: [diagnose, done]
+    on_enter:
+      validate:
+        - command: "git log --oneline -5 2>/dev/null || echo 'not a git repo'"
+          expect: not_empty
+          message: "Recent commits (context for when the bug may have been introduced)"
+          severity: info
+
+        - command: "git status --short | head -20"
+          expect: empty
+          message: "Working tree should be clean before starting a fix"
+          severity: warning
+
+  - id: diagnose
+    description: "Understand the root cause before writing a fix"
+    transitions: [fix, reproduce]
+    on_enter:
+      validate:
+        - command: "git diff --stat HEAD 2>/dev/null | tail -1 || echo 'no changes'"
+          expect: not_empty
+          message: "Files changed so far (investigation artifacts)"
+          severity: info
+
+  - id: fix
+    description: "Write the fix and any regression tests"
+    transitions: [verify, diagnose]
+
+  - id: verify
+    description: "Confirm the fix resolves the bug and doesn't introduce regressions"
+    transitions: [done, fix]
+    on_enter:
+      validate:
+        - command: "git diff --name-only 2>/dev/null | wc -l | tr -d ' '"
+          expect: greater_than(0)
+          message: "Must have changes to verify"
+          severity: warning
+
+        - command: "git diff --stat 2>/dev/null"
+          expect: not_empty
+          message: "Summary of changes"
+          severity: info
+
+  - id: done
+    type: terminal

@@ -1,0 +1,73 @@
+name: release
+description: "Prepare, validate, and ship a versioned release"
+version: "1.0.0"
+
+metadata:
+  author: "turnstile"
+  tags: ["starter-pack", "operations"]
+  principles:
+    - progressive-disclosure
+    - render-dont-record
+    - single-process-single-document
+
+parameters:
+  - name: version
+    description: "Version number to release (e.g., 1.2.0)"
+    required: true
+  - name: base_branch
+    description: "Branch to release from"
+    required: false
+    default: "main"
+
+states:
+  - id: start
+    type: initial
+    transitions: [prepare]
+
+  - id: prepare
+    description: "Review what will be in this release"
+    transitions: [validate]
+    on_enter:
+      validate:
+        - command: "git log --oneline $(git describe --tags --abbrev=0 2>/dev/null || echo HEAD~10)..HEAD 2>/dev/null | head -20"
+          expect: not_empty
+          message: "Commits since last tag (what's in this release)"
+          severity: info
+
+        - command: "git tag -l 2>/dev/null | tail -5"
+          expect: not_empty
+          message: "Recent tags (verify version numbering)"
+          severity: info
+
+        - command: "git status --short"
+          expect: empty
+          message: "Working tree must be clean before release"
+          severity: warning
+
+  - id: validate
+    description: "Run the full test suite and any pre-release checks"
+    transitions: [tag, prepare]
+    on_exit:
+      validate:
+        - command: "git diff --name-only HEAD 2>/dev/null | wc -l | tr -d ' '"
+          expect: equals("0")
+          message: "All changes must be committed before tagging"
+          severity: warning
+
+  - id: tag
+    description: "Create the release tag and finalize"
+    transitions: [done, validate]
+    on_enter:
+      validate:
+        - command: "git tag -l v${version} 2>/dev/null | wc -l | tr -d ' '"
+          expect: equals("0")
+          message: "Tag v${version} must not already exist"
+
+        - command: "git branch --show-current 2>/dev/null"
+          expect: not_empty
+          message: "Current branch (confirm you're on the right one)"
+          severity: info
+
+  - id: done
+    type: terminal
+    description: "Release v${version} is tagged and ready to ship"
