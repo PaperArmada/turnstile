@@ -18,7 +18,13 @@ from turnstile_core.errors import (
     ProcessNotFoundError,
     TransitionError,
 )
-from turnstile_core.loader import discover_definitions, load_definition, load_registry
+from turnstile_core.loader import (
+    DiscoveredDefinition,
+    discover_definitions,
+    discover_definitions_full,
+    load_definition,
+    load_registry,
+)
 from turnstile_core.models import ProcessDefinition, StateType
 from turnstile_core.persistence import (
     HistoryEntry,
@@ -73,13 +79,18 @@ class Engine:
         self.project_root = project_root
         self.registry = load_registry(project_root)
         self._definitions: dict[str, tuple[ProcessDefinition, str]] = {}
+        self._discovered: dict[str, DiscoveredDefinition] = {}
         self._store = StateStore(
             project_root / self.registry.settings.state_dir
         )
         self._load_definitions()
 
     def _load_definitions(self) -> None:
-        self._definitions = discover_definitions(self.project_root)
+        self._discovered = discover_definitions_full(self.project_root)
+        self._definitions = {
+            name: (d.definition, d.file_hash)
+            for name, d in self._discovered.items()
+        }
 
     def reload(self) -> None:
         """Reload definitions from disk (e.g., after editing YAML)."""
@@ -98,12 +109,12 @@ class Engine:
     def list_processes(self) -> list[dict[str, Any]]:
         """List all available process definitions."""
         result = []
-        for name, (defn, _hash) in self._definitions.items():
+        for name, disc in self._discovered.items():
             result.append({
-                "name": defn.name,
-                "description": defn.description,
-                "version": defn.version,
-                "source": "local",
+                "name": disc.definition.name,
+                "description": disc.definition.description,
+                "version": disc.definition.version,
+                "source": disc.source,
             })
         return result
 

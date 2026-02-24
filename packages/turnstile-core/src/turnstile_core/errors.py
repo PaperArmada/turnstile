@@ -23,3 +23,7 @@ class InstanceNotFoundError(TurnstileError):
 
 class ProcessNotFoundError(TurnstileError):
     """Referenced process definition does not exist."""
+
+
+class RegistryResolutionError(TurnstileError):
+    """Failed to resolve an external process source."""
