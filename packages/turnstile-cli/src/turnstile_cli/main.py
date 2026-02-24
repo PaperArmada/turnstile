@@ -7,7 +7,7 @@ from pathlib import Path
 
 import click
 
-from turnstile_core.admin import simulate_dry_run
+from turnstile_core.admin import generate_mermaid, simulate_dry_run
 from turnstile_core.engine import Engine
 from turnstile_core.guard import (
     check_enforcement,
@@ -95,12 +95,27 @@ def status(ctx: click.Context, show_all: bool) -> None:
 
 
 @cli.command()
-@click.argument("name")
+@click.argument("name", required=False, default=None)
+@click.option(
+    "--file",
+    "-f",
+    "file_path",
+    type=click.Path(exists=True),
+    default=None,
+    help="Load definition from a YAML file instead of the registry.",
+)
 @click.pass_context
-def graph(ctx: click.Context, name: str) -> None:
+def graph(ctx: click.Context, name: str | None, file_path: str | None) -> None:
     """Generate a Mermaid state diagram for a process."""
-    engine = _get_engine(ctx.obj["project"])
-    result = engine.graph(name)
+    if file_path:
+        defn = load_definition(Path(file_path))
+        result = generate_mermaid(defn)
+    elif name:
+        engine = _get_engine(ctx.obj["project"])
+        result = engine.graph(name)
+    else:
+        click.echo("Error: provide a process NAME or --file PATH", err=True)
+        raise SystemExit(1)
     click.echo(result["mermaid_source"])
 
 
