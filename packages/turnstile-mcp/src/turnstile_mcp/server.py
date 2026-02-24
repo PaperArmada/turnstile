@@ -42,7 +42,7 @@ def _get_engine() -> Engine:
 
 
 @mcp.tool()
-async def process_list(reload: bool = False) -> list[dict[str, Any]]:
+async def process_list(reload: bool = False) -> dict[str, Any]:
     """List all available process definitions for this project.
 
     Args:
@@ -52,7 +52,10 @@ async def process_list(reload: bool = False) -> list[dict[str, Any]]:
     engine = _get_engine()
     if reload:
         engine.reload()
-    return engine.list_processes()
+    return {
+        "project_root": str(engine.project_root),
+        "processes": engine.list_processes(),
+    }
 
 
 @mcp.tool()
