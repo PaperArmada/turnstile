@@ -1,0 +1,63 @@
+name: code-review
+description: "Structured review of a changeset or pull request"
+version: "1.0.0"
+
+metadata:
+  author: "turnstile"
+  tags: ["starter-pack", "development"]
+  principles:
+    - progressive-disclosure
+    - render-dont-record
+    - single-process-single-document
+
+parameters:
+  - name: branch
+    description: "Branch or PR to review"
+    required: true
+  - name: base_branch
+    description: "Base branch to compare against"
+    required: false
+    default: "main"
+
+states:
+  - id: start
+    type: initial
+    transitions: [survey]
+
+  - id: survey
+    description: "Understand the scope and context of the changes"
+    transitions: [review]
+    on_enter:
+      validate:
+        - command: "git log --oneline ${base_branch}..${branch} 2>/dev/null || echo 'branch not found'"
+          expect: not_empty
+          message: "Commits in this changeset"
+          severity: info
+
+        - command: "git diff --stat ${base_branch}...${branch} 2>/dev/null | tail -1 || echo 'no diff available'"
+          expect: not_empty
+          message: "Change summary (files changed, insertions, deletions)"
+          severity: info
+
+        - command: "git diff --name-only ${base_branch}...${branch} 2>/dev/null | head -30"
+          expect: not_empty
+          message: "Files changed"
+          severity: info
+
+  - id: review
+    description: "Read the code, check for issues, and note findings"
+    transitions: [request_changes, approve, survey]
+
+  - id: request_changes
+    description: "Changes are needed before this can be merged"
+    transitions: [review]
+    on_enter:
+      validate:
+        - command: "git diff --stat ${base_branch}...${branch} 2>/dev/null | tail -1 || echo 'no diff'"
+          expect: not_empty
+          message: "Current state of changes (has author addressed feedback?)"
+          severity: info
+
+  - id: approve
+    type: terminal
+    description: "Changes look good, ready to merge"

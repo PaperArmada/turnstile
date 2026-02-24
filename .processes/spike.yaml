@@ -1,0 +1,59 @@
+name: spike
+description: "Time-boxed investigation with a written outcome"
+version: "1.0.0"
+
+metadata:
+  author: "turnstile"
+  tags: ["starter-pack", "research"]
+  principles:
+    - progressive-disclosure
+    - render-dont-record
+    - single-process-single-document
+
+parameters:
+  - name: question
+    description: "The question this spike aims to answer"
+    required: true
+  - name: output_file
+    description: "Path to write findings (e.g., docs/spikes/my-topic.md)"
+    required: false
+    default: "none"
+
+states:
+  - id: start
+    type: initial
+    transitions: [investigate]
+
+  - id: investigate
+    description: "Research the question, explore options, gather evidence"
+    transitions: [write_up, abandoned]
+    on_enter:
+      validate:
+        - command: "git status --short | head -20"
+          expect: not_empty
+          message: "Working tree status (any prior work in progress?)"
+          severity: info
+
+  - id: write_up
+    description: "Document findings, recommendation, and next steps"
+    transitions: [done, investigate]
+    on_enter:
+      validate:
+        - command: "git diff --stat HEAD 2>/dev/null | tail -1 || echo 'no changes'"
+          expect: not_empty
+          message: "Changes made during investigation"
+          severity: info
+    on_exit:
+      validate:
+        - command: "test '${output_file}' = 'none' && echo skip || (test -f '${output_file}' && echo exists || echo missing)"
+          expect: not_equals("missing")
+          message: "Output file must exist if one was specified"
+          severity: warning
+
+  - id: done
+    type: terminal
+    description: "Spike complete, findings documented"
+
+  - id: abandoned
+    type: terminal
+    description: "Spike abandoned (question answered early, or not worth pursuing)"
