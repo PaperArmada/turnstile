@@ -78,7 +78,7 @@ states:
           message: "Definition must pass schema validation"
 
         # Show dry run so the author can review the full structure
-        - command: "uv run --package turnstile-cli turnstile dry-run ${name} 2>&1"
+        - command: "uv run --package turnstile-cli turnstile dry-run --file .processes/${name}.yaml 2>&1"
           expect: not_empty
           message: "Dry run output (review states, transitions, and gates)"
           severity: info

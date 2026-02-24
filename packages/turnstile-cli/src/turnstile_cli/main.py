@@ -7,6 +7,7 @@ from pathlib import Path
 
 import click
 
+from turnstile_core.admin import simulate_dry_run
 from turnstile_core.engine import Engine
 from turnstile_core.guard import (
     check_enforcement,
@@ -104,7 +105,15 @@ def graph(ctx: click.Context, name: str) -> None:
 
 
 @cli.command("dry-run")
-@click.argument("name")
+@click.argument("name", required=False, default=None)
+@click.option(
+    "--file",
+    "-f",
+    "file_path",
+    type=click.Path(exists=True),
+    default=None,
+    help="Load definition from a YAML file instead of the registry.",
+)
 @click.option(
     "--path",
     "-s",
@@ -113,11 +122,24 @@ def graph(ctx: click.Context, name: str) -> None:
     help="Simulate a specific path (repeat for each state).",
 )
 @click.pass_context
-def dry_run(ctx: click.Context, name: str, state_path: tuple[str, ...]) -> None:
+def dry_run(
+    ctx: click.Context,
+    name: str | None,
+    file_path: str | None,
+    state_path: tuple[str, ...],
+) -> None:
     """Simulate a process execution without running commands."""
-    engine = _get_engine(ctx.obj["project"])
-    path = list(state_path) if state_path else None
-    steps = engine.dry_run(name, path)
+    if file_path:
+        defn = load_definition(Path(file_path))
+        path = list(state_path) if state_path else None
+        steps = simulate_dry_run(defn, path)
+    elif name:
+        engine = _get_engine(ctx.obj["project"])
+        path = list(state_path) if state_path else None
+        steps = engine.dry_run(name, path)
+    else:
+        click.echo("Error: provide a process NAME or --file PATH", err=True)
+        raise SystemExit(1)
 
     for step in steps:
         if "step" in step:
