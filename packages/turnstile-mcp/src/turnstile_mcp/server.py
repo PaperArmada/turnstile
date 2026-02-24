@@ -273,6 +273,39 @@ async def process_migrate(instance_id: str) -> dict[str, Any]:
     return engine.migrate(instance_id)
 
 
+@mcp.tool()
+async def process_analytics() -> dict[str, Any]:
+    """Compute process analytics from archived (completed/abandoned) instances.
+
+    Returns per-process statistics including completion rates,
+    average durations per state, and override patterns.
+    """
+    engine = _get_engine()
+    return engine.analytics()
+
+
+@mcp.tool()
+async def process_check_completed(
+    name: str,
+    state: str | None = None,
+    parameters: dict[str, str] | None = None,
+    include_active: bool = False,
+) -> dict[str, Any]:
+    """Check whether a completed process instance matches criteria.
+
+    Used for CI checks and git hooks. Returns whether a matching
+    instance exists. Searches completed instances by default.
+
+    Args:
+        name: The process definition name to search for.
+        state: Optional state that must have been reached (in history).
+        parameters: Optional parameter key-value filters.
+        include_active: Also search active (in-progress) instances.
+    """
+    engine = _get_engine()
+    return engine.check_completed(name, state, parameters, include_active)
+
+
 def main():
     """Entry point for the MCP server."""
     mcp.run(transport="stdio")

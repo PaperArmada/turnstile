@@ -217,6 +217,22 @@ class StateStore:
             f"ABANDONED {instance.process_name}-{instance.instance_id}: {reason}"
         )
 
+    def list_completed(self) -> list[ProcessInstance]:
+        """List all completed process instances."""
+        instances = []
+        for path in self.completed_dir.rglob("*.json"):
+            data = json.loads(path.read_text())
+            instances.append(ProcessInstance(**data))
+        return instances
+
+    def list_abandoned(self) -> list[ProcessInstance]:
+        """List all abandoned process instances."""
+        instances = []
+        for path in self.abandoned_dir.rglob("*.json"):
+            data = json.loads(path.read_text())
+            instances.append(ProcessInstance(**data))
+        return instances
+
     def append_log(self, event: str) -> None:
         """Append an event to the log file."""
         timestamp = _now_iso()
