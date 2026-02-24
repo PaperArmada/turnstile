@@ -1,0 +1,24 @@
+[project]
+name = "turnstile-cli"
+version = "0.1.0"
+description = "CLI tool for turnstile process engine"
+requires-python = ">=3.12"
+dependencies = [
+    "turnstile-core",
+    "click>=8.0",
+]
+
+[project.scripts]
+turnstile = "turnstile_cli.main:cli"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.uv.sources]
+turnstile-core = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

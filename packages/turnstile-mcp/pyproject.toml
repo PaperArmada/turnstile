@@ -1,0 +1,22 @@
+[project]
+name = "turnstile-mcp"
+version = "0.1.0"
+description = "MCP server wrapping turnstile-core"
+requires-python = ">=3.12"
+dependencies = [
+    "turnstile-core",
+    "mcp>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[tool.uv.sources]
+turnstile-core = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

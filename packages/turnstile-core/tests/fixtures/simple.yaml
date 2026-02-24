@@ -1,0 +1,34 @@
+name: simple
+description: "A minimal process for testing"
+version: "1.0.0"
+
+parameters:
+  - name: task_name
+    description: "Name of the task"
+    required: true
+
+states:
+  - id: start
+    type: initial
+    transitions: [working]
+
+  - id: working
+    description: "Do the work"
+    transitions: [review, start]
+    on_exit:
+      validate:
+        - command: "echo done"
+          expect: not_empty
+          message: "Must have output"
+
+  - id: review
+    description: "Review the work"
+    transitions: [done, working]
+    on_enter:
+      validate:
+        - command: "echo ok"
+          expect: not_empty
+          message: "Must confirm"
+
+  - id: done
+    type: terminal

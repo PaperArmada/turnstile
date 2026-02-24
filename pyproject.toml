@@ -1,0 +1,17 @@
+[project]
+name = "turnstile-workspace"
+version = "0.1.0"
+description = "Process enforcement engine for AI agent workflows"
+requires-python = ">=3.12"
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

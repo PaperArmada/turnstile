@@ -1,0 +1,88 @@
+name: feature-deploy
+description: "Standard feature branch development and deployment workflow"
+version: "1.2.0"
+
+metadata:
+  author: "matt"
+  tags: ["deployment", "feature"]
+  estimated_duration: "30-60 min"
+
+parameters:
+  - name: branch_name
+    description: "Name of the feature branch"
+    required: true
+  - name: ticket_id
+    description: "Issue tracker ticket ID"
+    required: false
+    default: "none"
+
+states:
+  - id: start
+    type: initial
+    transitions: [create_branch]
+
+  - id: create_branch
+    description: "Create and checkout a feature branch"
+    transitions: [implement]
+    on_enter:
+      validate:
+        - command: "git status --porcelain"
+          expect: empty
+          message: "Working directory must be clean before branching"
+    on_exit:
+      validate:
+        - command: "git branch --show-current"
+          expect: not_equals("main")
+          message: "Must not be on main branch"
+
+  - id: implement
+    description: "Write the feature code"
+    transitions: [write_tests, needs_design_review]
+
+  - id: needs_design_review
+    description: "Complex changes need design review before testing"
+    transitions: [implement]
+    metadata:
+      optional: true
+      hint: "Trigger this if the implementation involves architectural changes"
+
+  - id: write_tests
+    description: "Write tests for the new feature"
+    transitions: [run_tests]
+
+  - id: run_tests
+    description: "Execute the test suite"
+    transitions: [review_ready, write_tests]
+    on_exit:
+      validate:
+        - command: "pytest --tb=short -q 2>&1; echo $?"
+          expect: ends_with("0")
+          message: "Test suite must pass"
+        - command: "pytest --cov --cov-fail-under=80 2>&1; echo $?"
+          expect: ends_with("0")
+          message: "Code coverage must be >= 80%"
+          severity: warning
+
+  - id: review_ready
+    description: "Code is ready for peer review"
+    transitions: [merge, implement]
+    on_enter:
+      validate:
+        - command: "git log main..HEAD --oneline | wc -l"
+          expect: greater_than(0)
+          message: "Branch must have commits ahead of main"
+
+  - id: merge
+    description: "Merge to main and deploy"
+    transitions: [done]
+    on_enter:
+      validate:
+        - command: "git fetch origin main && git merge-base --is-ancestor origin/main HEAD && echo yes || echo no"
+          expect: equals("yes")
+          message: "Branch must be up to date with main"
+
+  - id: done
+    type: terminal
+    on_enter:
+      actions:
+        - command: "echo 'Feature ${branch_name} (${ticket_id}) deployed at $(date)' >> .process-state/deploy.log"

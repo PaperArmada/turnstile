@@ -1,0 +1,19 @@
+[project]
+name = "turnstile-core"
+version = "0.1.0"
+description = "Core engine: state machine, schema, persistence"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
