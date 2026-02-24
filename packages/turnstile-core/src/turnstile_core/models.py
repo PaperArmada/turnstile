@@ -268,3 +268,65 @@ class RegistryConfig(BaseModel):
     extends: list[RegistryExtend] = Field(default_factory=list)
     local: list[str] = Field(default_factory=list)
     settings: RegistrySettings = Field(default_factory=RegistrySettings)
+
+
+# ---------------------------------------------------------------------------
+# Inheritance / override models
+# ---------------------------------------------------------------------------
+
+
+class ValidationPatch(BaseModel):
+    """Patch to a state's validation list."""
+
+    mode: str = "append"  # "append" or "replace"
+    items: list[ValidationEntry] = Field(default_factory=list)
+
+
+class StateHooksPatch(BaseModel):
+    """Patch to a state's hooks (on_enter or on_exit)."""
+
+    validations: ValidationPatch | None = Field(None, alias="validate")
+    actions: list[ActionHook] | None = None
+
+    model_config = {"populate_by_name": True}
+
+
+class StatePatch(BaseModel):
+    """Patch applied to an existing state in a parent definition."""
+
+    id: str
+    transitions: list[str] | None = None
+    description: str | None = None
+    on_enter: StateHooksPatch | None = None
+    on_exit: StateHooksPatch | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class ParameterOverride(BaseModel):
+    """Override section for parameters."""
+
+    append: list[ProcessParameter] = Field(default_factory=list)
+    remove: list[str] = Field(default_factory=list)
+
+
+class OverrideSpec(BaseModel):
+    """The overrides block in an inheriting definition."""
+
+    add_states: list[ProcessState] = Field(default_factory=list)
+    patch_states: list[StatePatch] = Field(default_factory=list)
+    parameters: ParameterOverride = Field(default_factory=ParameterOverride)
+
+
+class ProcessOverride(BaseModel):
+    """A process file that extends a parent with overrides.
+
+    Parsed separately from ProcessDefinition because the states list
+    comes from the parent, not this file.
+    """
+
+    extends: str
+    version_constraint: str = ""
+    name: str | None = None
+    description: str | None = None
+    version: str | None = None
+    overrides: OverrideSpec = Field(default_factory=OverrideSpec)
