@@ -179,6 +179,12 @@ turnstile hooks uninstall pre-push
 
 # Scaffold a shared process package
 turnstile init-package my-processes -P release -P review
+
+# Enforcement
+turnstile enforce status
+turnstile enforce on
+turnstile enforce monitor
+turnstile enforce off
 ```
 
 All commands accept `--project / -p` to specify the project root (defaults to CWD).
@@ -416,13 +422,60 @@ Process state is stored in `.process-state/` (add to `.gitignore`):
 
 Each instance is a JSON file containing the current state, full history, parameters, and any overrides.
 
+## Enforcement
+
+Turnstile can enforce process compliance by integrating with Claude Code's PreToolUse hooks. When enabled, file mutations (Write, Edit) are gated on having an active process instance.
+
+Three modes:
+
+| Mode | Behavior |
+|------|----------|
+| `off` | No enforcement (default) |
+| `monitor` | Warns when no active process, but allows the action |
+| `enforce` | Blocks file mutations when no active process |
+
+```bash
+# Enable enforcement (updates registry.yaml and installs Claude Code hook)
+turnstile enforce on
+
+# Enable monitor mode (warnings only)
+turnstile enforce monitor
+
+# Disable enforcement
+turnstile enforce off
+
+# Check current status
+turnstile enforce status
+```
+
+Enforcement is configured in `registry.yaml` under `settings.enforcement` and works via a PreToolUse hook in `.claude/settings.json` that calls `turnstile guard`. The guard fails open on any error to avoid blocking the agent unexpectedly.
+
+## Starter Pack
+
+Turnstile ships with four general-purpose processes suitable for any project:
+
+| Process | Purpose | States |
+|---------|---------|--------|
+| `bug-fix` | Structured bug fix: reproduce, diagnose, fix, verify | reproduce → diagnose → fix → verify → done |
+| `code-review` | Review a changeset or pull request | survey → review → request_changes / approve |
+| `release` | Prepare and ship a versioned release | prepare → validate → tag → done |
+| `spike` | Time-boxed investigation with a written outcome | investigate → write_up → done / abandoned |
+
+Each process uses info-severity gates to surface relevant context (recent commits, diff stats, working tree status) and back-transitions for forgiveness. They are generic by design, using git as the common denominator rather than project-specific tooling.
+
+To use the starter pack in your project, copy the desired YAML files from `.processes/` or reference them via the registry `extends` field.
+
 ## Dogfooding
 
 Turnstile uses its own processes in `.processes/`:
 
-- **create-process**: Meta-process for designing new process definitions. The understand state surfaces existing processes, design principles, and available expressions. The review state validates the YAML, dry-runs it, and checks for principle adherence (info gates, validation commands, back-transitions).
-- **readme-update**: Guides README updates with audit, update, and verify states. Validation gates query the codebase (module list, MCP tool names, CLI commands) to check completeness rather than relying on self-reported checklists.
-- **feature-development**: Standard development workflow with test gates.
+- **feature-development**: Standard development workflow with info gates that surface bd issues, test baselines, and diff stats. Test gate enforces passing suite.
+- **create-process**: Meta-process for designing new process definitions. The understand state surfaces existing processes, design principles, and available expressions. The review state validates the YAML, dry-runs it, and checks for principle adherence.
+- **readme-update**: Guides README updates with audit, update, and verify states. Validation gates query the codebase to check completeness.
+
+The starter pack processes (`bug-fix`, `code-review`, `release`, `spike`) were all created using `create-process`.
+
+Enforcement is set to **monitor** mode: Claude Code receives a warning when making file changes without an active process.
 
 These processes exercise the design principles documented in `docs/principles/`:
 
