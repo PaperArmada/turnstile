@@ -103,8 +103,8 @@ class TestCheckEnforcement:
 
 
 class TestGenerateHookConfig:
-    def test_generates_valid_config(self):
-        config = generate_hook_config("/path/to/turnstile")
+    def test_generates_dev_config(self):
+        config = generate_hook_config(turnstile_dir="/path/to/turnstile")
         assert "hooks" in config
         assert "PreToolUse" in config["hooks"]
         entries = config["hooks"]["PreToolUse"]
@@ -114,6 +114,18 @@ class TestGenerateHookConfig:
         cmd = entries[0]["hooks"][0]["command"]
         assert "turnstile guard" in cmd
         assert "/path/to/turnstile" in cmd
+        assert "uv --directory" in cmd
+
+    def test_generates_uvx_config(self):
+        config = generate_hook_config(repo_url="https://github.com/org/repo.git")
+        cmd = config["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        assert "turnstile guard" in cmd
+        assert "uvx" in cmd
+        assert "github.com/org/repo.git" in cmd
+
+    def test_requires_either_dir_or_url(self):
+        with pytest.raises(ValueError, match="Either"):
+            generate_hook_config()
 
 
 class TestInstallEnforcement:
@@ -214,6 +226,24 @@ class TestInstallEnforcement:
         # Only the non-turnstile hook should remain
         assert len(settings["hooks"]["PreToolUse"]) == 1
         assert settings["hooks"]["PreToolUse"][0]["matcher"] == "Bash"
+
+
+    def test_install_uvx_mode(self, tmp_path):
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir()
+
+        result = install_enforcement(
+            tmp_path, "monitor", repo_url="https://github.com/org/repo.git"
+        )
+        assert result["installed"]
+        assert result["mode"] == "monitor"
+
+        settings = json.loads(
+            (tmp_path / ".claude" / "settings.json").read_text()
+        )
+        cmd = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        assert "uvx" in cmd
+        assert "github.com/org/repo.git" in cmd
 
 
 class TestUpdateRegistryEnforcement:

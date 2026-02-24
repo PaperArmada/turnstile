@@ -129,16 +129,46 @@ def run_guard() -> None:
         pass
 
 
-def generate_hook_config(turnstile_dir: str) -> dict[str, Any]:
+def _guard_command_uvx(repo_url: str) -> str:
+    """Build the guard command using uvx (no local clone needed)."""
+    return (
+        f'uvx --python 3.12 --from "turnstile-cli @ '
+        f'git+{repo_url}#subdirectory=packages/turnstile-cli" '
+        f'turnstile guard'
+    )
+
+
+def _guard_command_dev(turnstile_dir: str) -> str:
+    """Build the guard command using uv --directory (for development)."""
+    return (
+        f"uv --directory {turnstile_dir} "
+        f"run --package turnstile-cli "
+        f"turnstile guard"
+    )
+
+
+def generate_hook_config(
+    turnstile_dir: str | None = None,
+    repo_url: str | None = None,
+) -> dict[str, Any]:
     """Generate the Claude Code hook configuration.
 
+    Provide repo_url for uvx mode (default), or turnstile_dir for dev mode.
+
     Args:
-        turnstile_dir: Absolute path to the turnstile repo
-            (used for uv --directory).
+        turnstile_dir: Absolute path to the turnstile repo (dev mode).
+        repo_url: Git URL for the turnstile repo (uvx mode).
 
     Returns:
         The hooks configuration dict for .claude/settings.json.
     """
+    if turnstile_dir:
+        command = _guard_command_dev(turnstile_dir)
+    elif repo_url:
+        command = _guard_command_uvx(repo_url)
+    else:
+        raise ValueError("Either turnstile_dir or repo_url must be provided")
+
     return {
         "hooks": {
             "PreToolUse": [
@@ -147,11 +177,7 @@ def generate_hook_config(turnstile_dir: str) -> dict[str, Any]:
                     "hooks": [
                         {
                             "type": "command",
-                            "command": (
-                                f"uv --directory {turnstile_dir} "
-                                f"run --package turnstile-cli "
-                                f"turnstile guard"
-                            ),
+                            "command": command,
                         }
                     ],
                 }
@@ -164,21 +190,25 @@ def install_enforcement(
     project_root: Path,
     mode: str,
     turnstile_dir: str | None = None,
+    repo_url: str | None = None,
 ) -> dict[str, Any]:
     """Set up enforcement for a project.
 
     Updates .claude/settings.json with the PreToolUse hook configuration.
     Does NOT modify registry.yaml (the user or a separate command handles that).
 
+    Provide repo_url for uvx mode (default) or turnstile_dir for dev mode.
+
     Args:
         project_root: The project root directory.
         mode: Enforcement mode ("enforce", "monitor", or "off").
-        turnstile_dir: Path to the turnstile repo. If None, auto-detected.
+        turnstile_dir: Path to the turnstile repo (dev mode).
+        repo_url: Git URL for the turnstile repo (uvx mode).
 
     Returns:
         A result dict with status information.
     """
-    if turnstile_dir is None:
+    if turnstile_dir is None and repo_url is None:
         turnstile_dir = _find_turnstile_root()
 
     settings_dir = project_root / ".claude"
@@ -215,7 +245,9 @@ def install_enforcement(
         }
 
     # Install hook for enforce or monitor mode
-    hook_config = generate_hook_config(turnstile_dir)
+    hook_config = generate_hook_config(
+        turnstile_dir=turnstile_dir, repo_url=repo_url
+    )
 
     settings_dir.mkdir(parents=True, exist_ok=True)
 

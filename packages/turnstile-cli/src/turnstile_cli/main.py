@@ -23,6 +23,49 @@ from turnstile_core.schema import export_schemas
 from turnstile_core.template import scaffold_package
 
 
+TURNSTILE_REPO_URL = "https://github.com/PaperArmada/turnstile.git"
+
+
+def _mcp_config_uvx(repo_url: str) -> dict:
+    """Generate .mcp.json config using uvx (no local clone needed)."""
+    return {
+        "mcpServers": {
+            "turnstile": {
+                "type": "stdio",
+                "command": "uvx",
+                "args": [
+                    "--python", "3.12",
+                    "--from",
+                    f"turnstile-mcp @ git+{repo_url}"
+                    f"#subdirectory=packages/turnstile-mcp",
+                    "python", "-m", "turnstile_mcp.server",
+                ],
+            }
+        }
+    }
+
+
+def _mcp_config_dev(turnstile_dir: str) -> dict:
+    """Generate .mcp.json config using uv --directory (for development)."""
+    return {
+        "mcpServers": {
+            "turnstile": {
+                "type": "stdio",
+                "command": "bash",
+                "args": [
+                    "-c",
+                    (
+                        f"TURNSTILE_PROJECT_DIR=$(pwd) "
+                        f"uv --directory {turnstile_dir} "
+                        f"run --package turnstile-mcp "
+                        f"python -m turnstile_mcp.server"
+                    ),
+                ],
+            }
+        }
+    }
+
+
 def _get_engine(project_root: str | None = None) -> Engine:
     root = Path(project_root) if project_root else Path.cwd()
     return Engine(root)
@@ -490,27 +533,49 @@ def init_package(name: str, processes: tuple[str, ...], output: str | None) -> N
 
 @cli.command()
 @click.option(
-    "--turnstile-dir",
-    default=None,
-    help="Path to turnstile installation (auto-detected if omitted).",
+    "--dev", is_flag=True, default=False,
+    help="Use dev mode (uv --directory) instead of uvx.",
+)
+@click.option(
+    "--turnstile-dir", default=None,
+    help="Path to turnstile repo (dev mode only, auto-detected if omitted).",
+)
+@click.option(
+    "--repo", default=None,
+    help="Git repo URL (uvx mode, defaults to PaperArmada/turnstile).",
+)
+@click.option(
+    "--enforce", "enforce_mode", default="monitor",
+    type=click.Choice(["monitor", "enforce", "off"]),
+    help="Enforcement mode (default: monitor).",
 )
 @click.pass_context
-def init(ctx: click.Context, turnstile_dir: str | None) -> None:
+def init(
+    ctx: click.Context,
+    dev: bool,
+    turnstile_dir: str | None,
+    repo: str | None,
+    enforce_mode: str,
+) -> None:
     """Initialize turnstile in a project directory.
 
-    Generates .mcp.json, .processes/ directory, and registry.yaml
-    for a consumer project. Safe to run in an existing project;
-    will not overwrite existing files.
+    Sets up .mcp.json, .processes/, registry.yaml, and enforcement hooks.
+    Safe to run in an existing project; will not overwrite existing files.
 
+    By default, uses uvx to run turnstile directly from GitHub (no local
+    clone needed). Use --dev for local development with live code changes.
+
+    \b
     Examples:
-
       turnstile init
-
-      turnstile init --turnstile-dir /opt/turnstile
+      turnstile init --dev
+      turnstile init --enforce off
+      turnstile init --repo https://github.com/myorg/turnstile.git
     """
     root = Path(ctx.obj["project"]) if ctx.obj.get("project") else Path.cwd()
+    repo_url = repo or TURNSTILE_REPO_URL
 
-    if turnstile_dir is None:
+    if dev and turnstile_dir is None:
         turnstile_dir = _find_turnstile_root()
 
     created: list[str] = []
@@ -525,41 +590,58 @@ def init(ctx: click.Context, turnstile_dir: str | None) -> None:
     registry_path = proc_dir / "registry.yaml"
     if not registry_path.exists():
         registry_path.write_text(
-            'version: "1.0"\n\nsettings:\n  enforcement: monitor\n'
+            f'version: "1.0"\n\nsettings:\n  enforcement: {enforce_mode}\n'
         )
         created.append(".processes/registry.yaml")
 
     # .mcp.json
     mcp_path = root / ".mcp.json"
     if not mcp_path.exists():
-        mcp_config = {
-            "mcpServers": {
-                "turnstile": {
-                    "type": "stdio",
-                    "command": "bash",
-                    "args": [
-                        "-c",
-                        (
-                            f"TURNSTILE_PROJECT_DIR=$(pwd) "
-                            f"uv --directory {turnstile_dir} "
-                            f"run --package turnstile-mcp "
-                            f"python -m turnstile_mcp.server"
-                        ),
-                    ],
-                }
-            }
-        }
+        if dev:
+            mcp_config = _mcp_config_dev(turnstile_dir)
+        else:
+            mcp_config = _mcp_config_uvx(repo_url)
         mcp_path.write_text(json.dumps(mcp_config, indent=2) + "\n")
         created.append(".mcp.json")
     else:
-        click.echo(f"  .mcp.json already exists (skipped)")
+        click.echo("  .mcp.json already exists (skipped)")
+
+    # .claude/settings.json (enforcement hook)
+    if enforce_mode != "off":
+        if dev:
+            result = install_enforcement(
+                root, enforce_mode, turnstile_dir=turnstile_dir
+            )
+        else:
+            result = install_enforcement(
+                root, enforce_mode, repo_url=repo_url
+            )
+        created.append(f".claude/settings.json ({enforce_mode} mode)")
+
+    # .gitignore additions
+    gitignore_path = root / ".gitignore"
+    gitignore_entries = [".mcp.json", ".claude/settings.json", ".process-state/"]
+    if gitignore_path.exists():
+        existing = gitignore_path.read_text()
+    else:
+        existing = ""
+    to_add = [e for e in gitignore_entries if e not in existing]
+    if to_add:
+        with open(gitignore_path, "a") as f:
+            if existing and not existing.endswith("\n"):
+                f.write("\n")
+            f.write("\n".join(to_add) + "\n")
+        created.append(f".gitignore (+{', '.join(to_add)})")
 
     if created:
-        click.echo(f"Initialized turnstile in {root}")
+        mode_label = "dev" if dev else "uvx"
+        click.echo(f"Initialized turnstile in {root} ({mode_label} mode)")
         for f in created:
             click.echo(f"  {f}")
-        click.echo(f"\nNote: .mcp.json contains a machine-specific path.")
-        click.echo(f"Add it to .gitignore or regenerate on each machine.")
+        if not dev:
+            click.echo(
+                "\nRestart Claude Code to connect the MCP server."
+            )
     else:
         click.echo("Everything already exists, nothing to do.")
 
@@ -609,33 +691,43 @@ def enforce_status(ctx: click.Context) -> None:
 
 
 @enforce.command("on")
-@click.option(
-    "--turnstile-dir",
-    default=None,
-    help="Path to turnstile repo (auto-detected if omitted).",
-)
+@click.option("--dev", is_flag=True, default=False, help="Use dev mode (uv --directory).")
+@click.option("--turnstile-dir", default=None, help="Path to turnstile repo (dev mode).")
+@click.option("--repo", default=None, help="Git repo URL (uvx mode).")
 @click.pass_context
-def enforce_on(ctx: click.Context, turnstile_dir: str | None) -> None:
+def enforce_on(ctx: click.Context, dev: bool, turnstile_dir: str | None, repo: str | None) -> None:
     """Enable enforcement (blocks file mutations without an active process)."""
     root = Path(ctx.obj["project"]) if ctx.obj.get("project") else Path.cwd()
     update_registry_enforcement(root, "enforce")
-    result = install_enforcement(root, "enforce", turnstile_dir)
+    if dev:
+        result = install_enforcement(
+            root, "enforce", turnstile_dir=turnstile_dir or _find_turnstile_root()
+        )
+    else:
+        result = install_enforcement(
+            root, "enforce", repo_url=repo or TURNSTILE_REPO_URL
+        )
     click.echo(f"Enforcement enabled: {result['message']}")
     click.echo(f"  Settings: {result.get('settings_path', 'N/A')}")
 
 
 @enforce.command("monitor")
-@click.option(
-    "--turnstile-dir",
-    default=None,
-    help="Path to turnstile repo (auto-detected if omitted).",
-)
+@click.option("--dev", is_flag=True, default=False, help="Use dev mode (uv --directory).")
+@click.option("--turnstile-dir", default=None, help="Path to turnstile repo (dev mode).")
+@click.option("--repo", default=None, help="Git repo URL (uvx mode).")
 @click.pass_context
-def enforce_monitor(ctx: click.Context, turnstile_dir: str | None) -> None:
+def enforce_monitor(ctx: click.Context, dev: bool, turnstile_dir: str | None, repo: str | None) -> None:
     """Enable monitor mode (warns but allows mutations without a process)."""
     root = Path(ctx.obj["project"]) if ctx.obj.get("project") else Path.cwd()
     update_registry_enforcement(root, "monitor")
-    result = install_enforcement(root, "monitor", turnstile_dir)
+    if dev:
+        result = install_enforcement(
+            root, "monitor", turnstile_dir=turnstile_dir or _find_turnstile_root()
+        )
+    else:
+        result = install_enforcement(
+            root, "monitor", repo_url=repo or TURNSTILE_REPO_URL
+        )
     click.echo(f"Monitor mode enabled: {result['message']}")
     click.echo(f"  Settings: {result.get('settings_path', 'N/A')}")
 
