@@ -243,6 +243,21 @@ async def process_dry_run(
     return engine.dry_run(name, path)
 
 
+@mcp.tool()
+async def process_diff(path_a: str, path_b: str) -> dict[str, Any]:
+    """Compare two process definition YAML files.
+
+    Shows added/removed/modified states, transition changes, and
+    parameter changes. Useful for reviewing changes to definitions.
+
+    Args:
+        path_a: Path to the first (older) YAML definition file.
+        path_b: Path to the second (newer) YAML definition file.
+    """
+    engine = _get_engine()
+    return engine.diff(path_a, path_b)
+
+
 def main():
     """Entry point for the MCP server."""
     mcp.run(transport="stdio")

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from turnstile_core.admin import generate_mermaid, simulate_dry_run
+from turnstile_core.admin import diff_definitions, generate_mermaid, simulate_dry_run
 from turnstile_core.engine import Engine
 from turnstile_core.loader import load_definition
 
@@ -156,3 +156,69 @@ class TestEngineIntegration:
         result = engine.dry_run("simple", ["working", "review", "done"])
         assert len(result) == 3
         assert all(s["legal"] for s in result)
+
+    def test_engine_diff(self, engine):
+        result = engine.diff(
+            str(FIXTURES / "simple.yaml"),
+            str(FIXTURES / "simple-v2.yaml"),
+        )
+        assert result["version_a"] == "1.0.0"
+        assert result["version_b"] == "2.0.0"
+        assert "lint" in result["added_states"]
+        assert len(result["removed_states"]) == 0
+
+
+# ---------------------------------------------------------------------------
+# Definition diffing
+# ---------------------------------------------------------------------------
+
+
+class TestDiffDefinitions:
+    @pytest.fixture()
+    def v1(self):
+        return load_definition(FIXTURES / "simple.yaml")
+
+    @pytest.fixture()
+    def v2(self):
+        return load_definition(FIXTURES / "simple-v2.yaml")
+
+    def test_added_state(self, v1, v2):
+        result = diff_definitions(v1, v2)
+        assert "lint" in result["added_states"]
+
+    def test_no_removed_states(self, v1, v2):
+        result = diff_definitions(v1, v2)
+        assert result["removed_states"] == []
+
+    def test_transition_changes(self, v1, v2):
+        result = diff_definitions(v1, v2)
+        # working lost "review" and "start", gained "lint"
+        working_tc = next(
+            tc for tc in result["transition_changes"] if tc["state"] == "working"
+        )
+        assert "lint" in working_tc["added"]
+        assert "review" in working_tc["removed"]
+        assert "start" in working_tc["removed"]
+
+    def test_modified_states(self, v1, v2):
+        result = diff_definitions(v1, v2)
+        modified_ids = [m["state"] for m in result["modified_states"]]
+        assert "review" in modified_ids  # description changed
+        assert "working" in modified_ids  # transitions changed
+
+    def test_parameter_changes(self, v1, v2):
+        result = diff_definitions(v1, v2)
+        assert "reviewer" in result["parameter_changes"]["added"]
+        assert result["parameter_changes"]["removed"] == []
+
+    def test_summary(self, v1, v2):
+        result = diff_definitions(v1, v2)
+        assert "added" in result["summary"]
+        assert "modified" in result["summary"]
+
+    def test_identical(self, v1):
+        result = diff_definitions(v1, v1)
+        assert result["added_states"] == []
+        assert result["removed_states"] == []
+        assert result["modified_states"] == []
+        assert result["summary"] == "no changes"

@@ -174,3 +174,125 @@ def _simulate_path(
         current = target
 
     return results
+
+
+# ---------------------------------------------------------------------------
+# Definition diffing
+# ---------------------------------------------------------------------------
+
+
+def diff_definitions(
+    defn_a: ProcessDefinition, defn_b: ProcessDefinition
+) -> dict[str, Any]:
+    """Compare two process definitions and return their differences.
+
+    Compares states, transitions, validations, and parameters.
+    """
+    states_a = {s.id: s for s in defn_a.states}
+    states_b = {s.id: s for s in defn_b.states}
+    ids_a = set(states_a.keys())
+    ids_b = set(states_b.keys())
+
+    added = sorted(ids_b - ids_a)
+    removed = sorted(ids_a - ids_b)
+    common = sorted(ids_a & ids_b)
+
+    modified: list[dict[str, Any]] = []
+    transition_changes: list[dict[str, Any]] = []
+
+    for sid in common:
+        sa, sb = states_a[sid], states_b[sid]
+        changes: dict[str, Any] = {"state": sid}
+        has_changes = False
+
+        # Type change
+        if sa.type != sb.type:
+            changes["type"] = {"from": sa.type.value, "to": sb.type.value}
+            has_changes = True
+
+        # Description change
+        if sa.description != sb.description:
+            changes["description"] = {"from": sa.description, "to": sb.description}
+            has_changes = True
+
+        # Transition changes
+        trans_a = set(sa.transitions)
+        trans_b = set(sb.transitions)
+        if trans_a != trans_b:
+            tc = {
+                "state": sid,
+                "added": sorted(trans_b - trans_a),
+                "removed": sorted(trans_a - trans_b),
+            }
+            transition_changes.append(tc)
+            has_changes = True
+
+        # Validation changes (compare by serialization)
+        enter_a = _serialize_hooks(sa.on_enter)
+        enter_b = _serialize_hooks(sb.on_enter)
+        if enter_a != enter_b:
+            changes["on_enter_changed"] = True
+            has_changes = True
+
+        exit_a = _serialize_hooks(sa.on_exit)
+        exit_b = _serialize_hooks(sb.on_exit)
+        if exit_a != exit_b:
+            changes["on_exit_changed"] = True
+            has_changes = True
+
+        if has_changes:
+            modified.append(changes)
+
+    # Parameter changes
+    params_a = {p.name: p for p in defn_a.parameters}
+    params_b = {p.name: p for p in defn_b.parameters}
+    param_names_a = set(params_a.keys())
+    param_names_b = set(params_b.keys())
+
+    param_changes: dict[str, Any] = {}
+    if param_names_a != param_names_b or any(
+        params_a[n].model_dump() != params_b[n].model_dump()
+        for n in param_names_a & param_names_b
+    ):
+        param_changes = {
+            "added": sorted(param_names_b - param_names_a),
+            "removed": sorted(param_names_a - param_names_b),
+        }
+
+    return {
+        "name": defn_b.name,
+        "version_a": defn_a.version,
+        "version_b": defn_b.version,
+        "added_states": added,
+        "removed_states": removed,
+        "modified_states": modified,
+        "transition_changes": transition_changes,
+        "parameter_changes": param_changes,
+        "summary": _diff_summary(added, removed, modified, transition_changes),
+    }
+
+
+def _serialize_hooks(hooks) -> str:
+    """Serialize hooks to a comparable string."""
+    if hooks is None:
+        return ""
+    return hooks.model_dump_json(by_alias=True)
+
+
+def _diff_summary(
+    added: list[str],
+    removed: list[str],
+    modified: list[dict],
+    transition_changes: list[dict],
+) -> str:
+    """Generate a human-readable summary of changes."""
+    parts = []
+    if added:
+        parts.append(f"{len(added)} state(s) added")
+    if removed:
+        parts.append(f"{len(removed)} state(s) removed")
+    if modified:
+        parts.append(f"{len(modified)} state(s) modified")
+    if transition_changes:
+        parts.append(f"{len(transition_changes)} transition change(s)")
+    return "; ".join(parts) if parts else "no changes"

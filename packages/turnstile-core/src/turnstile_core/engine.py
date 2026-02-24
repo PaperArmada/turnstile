@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from turnstile_core.admin import generate_mermaid, simulate_dry_run
+from turnstile_core.admin import diff_definitions, generate_mermaid, simulate_dry_run
 from turnstile_core.errors import (
     DefinitionError,
     InstanceNotFoundError,
@@ -429,6 +429,12 @@ class Engine:
         """
         defn, _ = self._get_definition(name)
         return simulate_dry_run(defn, path)
+
+    def diff(self, path_a: str, path_b: str) -> dict[str, Any]:
+        """Diff two process definition files."""
+        defn_a = load_definition(Path(path_a))
+        defn_b = load_definition(Path(path_b))
+        return diff_definitions(defn_a, defn_b)
 
     def validate_definition(self, path: str) -> dict[str, Any]:
         """Validate a process definition file."""

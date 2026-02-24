@@ -1,0 +1,47 @@
+name: simple
+description: "A minimal process for testing (v2 with lint step)"
+version: "2.0.0"
+
+parameters:
+  - name: task_name
+    description: "Name of the task"
+    required: true
+  - name: reviewer
+    description: "Who will review"
+    required: false
+    default: "team"
+
+states:
+  - id: start
+    type: initial
+    transitions: [working]
+
+  - id: working
+    description: "Do the work"
+    transitions: [lint]
+    on_exit:
+      validate:
+        - command: "echo done"
+          expect: not_empty
+          message: "Must have output"
+
+  - id: lint
+    description: "Run linters"
+    transitions: [review]
+    on_exit:
+      validate:
+        - command: "echo clean"
+          expect: not_empty
+          message: "Linters must pass"
+
+  - id: review
+    description: "Review the work (updated description)"
+    transitions: [done, working]
+    on_enter:
+      validate:
+        - command: "echo ok"
+          expect: not_empty
+          message: "Must confirm"
+
+  - id: done
+    type: terminal
