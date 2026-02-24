@@ -420,6 +420,7 @@ Each instance is a JSON file containing the current state, full history, paramet
 
 Turnstile uses its own processes in `.processes/`:
 
+- **create-process**: Meta-process for designing new process definitions. The understand state surfaces existing processes, design principles, and available expressions. The review state validates the YAML, dry-runs it, and checks for principle adherence (info gates, validation commands, back-transitions).
 - **readme-update**: Guides README updates with audit, update, and verify states. Validation gates query the codebase (module list, MCP tool names, CLI commands) to check completeness rather than relying on self-reported checklists.
 - **feature-development**: Standard development workflow with test gates.
 

@@ -1,0 +1,108 @@
+name: create-process
+description: "Design and validate a new turnstile process definition"
+version: "1.0.0"
+
+metadata:
+  principles:
+    - progressive-disclosure
+    - render-dont-record
+    - single-process-single-document
+  notes:
+    - "Back-transitions at every non-terminal state keep the workflow forgiving"
+    - "Info gates in understand state are the primary discovery mechanism"
+    - "Review gates check both validity and adherence to principles"
+
+parameters:
+  - name: name
+    description: "Name for the new process (becomes .processes/<name>.yaml)"
+    required: true
+  - name: purpose
+    description: "What workflow this process enforces"
+    required: true
+
+states:
+  - id: start
+    type: initial
+    transitions: [understand]
+
+  - id: understand
+    description: "Survey existing processes, available tools, and design principles"
+    transitions: [draft]
+    on_enter:
+      validate:
+        # Guard: don't overwrite an existing process
+        - command: "test -f .processes/${name}.yaml && echo exists || echo available"
+          expect: equals("available")
+          message: ".processes/${name}.yaml must not already exist"
+
+        # Progressive disclosure: surface what the author needs to
+        # design a good process, nothing more.
+
+        - command: "uv run --package turnstile-cli turnstile list 2>&1"
+          expect: not_empty
+          message: "Existing processes (study patterns, avoid duplication)"
+          severity: info
+
+        - command: "for f in docs/principles/*.md; do head -1 \"$f\" | sed 's/# //'; done"
+          expect: not_empty
+          message: "Design principles to follow"
+          severity: info
+
+        - command: "echo 'empty | not_empty | equals(v) | not_equals(v) | contains(v) | starts_with(v) | ends_with(v) | matches(re) | greater_than(N) | less_than(N) | exit_code(N)'"
+          expect: not_empty
+          message: "Available expect expressions for validation gates"
+          severity: info
+
+        - command: "echo 'error: blocks transition | warning: logs, allows | info: always allows, surfaces context'"
+          expect: not_empty
+          message: "Severity levels"
+          severity: info
+
+  - id: draft
+    description: "Write .processes/${name}.yaml with states, transitions, and gates"
+    transitions: [review, understand]
+    on_exit:
+      validate:
+        - command: "test -f .processes/${name}.yaml && echo exists || echo missing"
+          expect: equals("exists")
+          message: ".processes/${name}.yaml must exist"
+
+  - id: review
+    description: "Validate the definition, dry-run it, and check principle adherence"
+    transitions: [done, draft]
+    on_enter:
+      validate:
+        # Hard gate: must be structurally valid
+        - command: "uv run --package turnstile-cli turnstile validate .processes/${name}.yaml 2>&1"
+          expect: starts_with("Valid")
+          message: "Definition must pass schema validation"
+
+        # Show dry run so the author can review the full structure
+        - command: "uv run --package turnstile-cli turnstile dry-run ${name} 2>&1"
+          expect: not_empty
+          message: "Dry run output (review states, transitions, and gates)"
+          severity: info
+
+        # Principle checks: advisory, not blocking.
+        # A simple process may legitimately skip some of these.
+
+        # Progressive disclosure: info gates surface context for the agent
+        - command: "grep -c 'severity: info' .processes/${name}.yaml"
+          expect: greater_than(0)
+          message: "Should have info-severity gates (progressive disclosure)"
+          severity: warning
+
+        # Render don't record: gates should query systems, not trust self-reports
+        - command: "grep -c 'command:' .processes/${name}.yaml"
+          expect: greater_than(0)
+          message: "Should have validation gates that query actual state"
+          severity: warning
+
+        # Forgiveness: at least one state should offer multiple transitions
+        - command: "grep 'transitions:' .processes/${name}.yaml | grep -c ','"
+          expect: greater_than(0)
+          message: "Should have at least one state with back-transitions"
+          severity: warning
+
+  - id: done
+    type: terminal
