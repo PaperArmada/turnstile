@@ -10,6 +10,7 @@ import click
 from turnstile_core.engine import Engine
 from turnstile_core.loader import load_definition
 from turnstile_core.schema import export_schemas
+from turnstile_core.template import scaffold_package
 
 
 def _get_engine(project_root: str | None = None) -> Engine:
@@ -183,6 +184,36 @@ def schema(ctx: click.Context, output: str | None) -> None:
                 ".processes/registry.yaml",
         }
     }, indent=2))
+
+
+@cli.command("init-package")
+@click.argument("name")
+@click.option(
+    "--process",
+    "-P",
+    "processes",
+    multiple=True,
+    help="Process name to include (repeat for multiple).",
+)
+@click.option(
+    "--output",
+    "-o",
+    default=None,
+    type=click.Path(),
+    help="Output directory (defaults to ./<name>/).",
+)
+def init_package(name: str, processes: tuple[str, ...], output: str | None) -> None:
+    """Scaffold a new shared process package."""
+    out_dir = Path(output) if output else Path.cwd() / name
+    proc_list = list(processes) if processes else None
+
+    created = scaffold_package(name, out_dir, proc_list)
+    click.echo(f"Created package '{name}' at {out_dir}")
+    for label in created:
+        click.echo(f"  {label}")
+    click.echo(f"\nNext steps:")
+    click.echo(f"  1. Edit the process definitions in {out_dir}/src/")
+    click.echo(f"  2. Build and publish: cd {out_dir} && uv build")
 
 
 if __name__ == "__main__":
