@@ -15,6 +15,9 @@ uv.lock
 # Process engine runtime state
 .process-state/
 
+# Claude Code (contains machine-specific paths from enforcement hooks)
+.claude/settings.json
+
 # IDE
 .vscode/
 .idea/
