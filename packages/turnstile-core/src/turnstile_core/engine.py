@@ -11,7 +11,6 @@ from turnstile_core.errors import (
     InstanceNotFoundError,
     ProcessNotFoundError,
     TransitionError,
-    ValidationError,
 )
 from turnstile_core.loader import discover_definitions, load_definition, load_registry
 from turnstile_core.models import ProcessDefinition, StateType
