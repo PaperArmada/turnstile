@@ -100,3 +100,31 @@ class TestStateStore:
         assert store.active_dir.exists()
         assert store.completed_dir.exists()
         assert store.abandoned_dir.exists()
+
+    def test_load_any_active(self, store: StateStore):
+        instance = store.create("test", "start")
+        loaded = store.load_any(instance.instance_id)
+        assert loaded.instance_id == instance.instance_id
+        assert loaded.status == "active"
+
+    def test_load_any_completed(self, store: StateStore):
+        instance = store.create("test", "start")
+        iid = instance.instance_id
+        store.complete(instance)
+
+        loaded = store.load_any(iid)
+        assert loaded.instance_id == iid
+        assert loaded.status == "completed"
+
+    def test_load_any_abandoned(self, store: StateStore):
+        instance = store.create("test", "start")
+        iid = instance.instance_id
+        store.abandon(instance, "test reason")
+
+        loaded = store.load_any(iid)
+        assert loaded.instance_id == iid
+        assert loaded.status == "abandoned"
+
+    def test_load_any_missing_raises(self, store: StateStore):
+        with pytest.raises(InstanceNotFoundError, match="checked active"):
+            store.load_any("nonexistent")

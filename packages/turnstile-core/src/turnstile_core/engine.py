@@ -399,8 +399,11 @@ class Engine:
         }
 
     def history(self, instance_id: str) -> list[dict[str, Any]]:
-        """Get full transition history for a process instance."""
-        instance = self._store.load(instance_id)
+        """Get full transition history for a process instance.
+
+        Searches active, completed, and abandoned instances.
+        """
+        instance = self._store.load_any(instance_id)
         return [
             {
                 "from_state": h.from_state,

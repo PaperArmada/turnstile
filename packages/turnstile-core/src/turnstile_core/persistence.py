@@ -131,6 +131,30 @@ class StateStore:
                 return ProcessInstance(**data)
         raise InstanceNotFoundError(f"No active instance with ID '{instance_id}'")
 
+    def load_any(self, instance_id: str) -> ProcessInstance:
+        """Load an instance from any directory (active, completed, abandoned).
+
+        Searches active first, then completed, then abandoned.
+        Raises InstanceNotFoundError if not found anywhere.
+        """
+        # Try active first
+        for path in self.active_dir.iterdir():
+            if path.suffix == ".json" and instance_id in path.stem:
+                data = json.loads(path.read_text())
+                return ProcessInstance(**data)
+
+        # Search archived directories (organized by month)
+        for archive_dir in (self.completed_dir, self.abandoned_dir):
+            for path in archive_dir.rglob("*.json"):
+                if instance_id in path.stem:
+                    data = json.loads(path.read_text())
+                    return ProcessInstance(**data)
+
+        raise InstanceNotFoundError(
+            f"No instance with ID '{instance_id}' (checked active, "
+            f"completed, and abandoned)"
+        )
+
     def save(self, instance: ProcessInstance) -> None:
         """Persist an instance back to disk."""
         instance.updated_at = _now_iso()

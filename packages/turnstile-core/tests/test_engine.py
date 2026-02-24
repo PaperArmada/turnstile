@@ -222,6 +222,20 @@ class TestHistory:
         assert hist[1]["from_state"] == "working"
         assert hist[1]["to_state"] == "review"
 
+    @pytest.mark.asyncio
+    async def test_history_completed_instance(self, engine: Engine):
+        started = engine.start("simple", {"task_name": "test"})
+        iid = started["instance_id"]
+
+        await engine.transition(iid, "working")
+        await engine.transition(iid, "review")
+        await engine.transition(iid, "done")
+
+        # Instance is now archived, but history should still work
+        hist = engine.history(iid)
+        assert len(hist) == 3
+        assert hist[-1]["to_state"] == "done"
+
 
 class TestValidateDefinition:
     def test_valid(self, engine: Engine):
