@@ -493,6 +493,7 @@ class Engine:
             "from": instance.current_state,
             "to": target_state,
             "at": _now_iso(),
+            "triggered_by": f"skip: {reason}",
             "validations": [],
         })
 
