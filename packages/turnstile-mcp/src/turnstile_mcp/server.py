@@ -36,13 +36,16 @@ def _get_engine() -> Engine:
 
 
 @mcp.tool()
-async def process_list() -> list[dict[str, Any]]:
+async def process_list(reload: bool = False) -> list[dict[str, Any]]:
     """List all available process definitions for this project.
 
-    Returns a list of process definitions with name, description,
-    version, and source.
+    Args:
+        reload: If true, reload definitions from disk before listing.
+                Use after adding or editing YAML files.
     """
     engine = _get_engine()
+    if reload:
+        engine.reload()
     return engine.list_processes()
 
 
