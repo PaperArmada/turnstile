@@ -56,6 +56,12 @@ class ProcessInstance(BaseModel):
     overrides: list[OverrideEntry] = Field(default_factory=list)
     status: str = "active"  # active, completed, abandoned
 
+    # Subprocess tracking
+    parent_instance_id: str | None = None
+    parent_state_id: str | None = None
+    child_instance_id: str | None = None
+    suspended: bool = False
+
     model_config = {"populate_by_name": True}
 
 

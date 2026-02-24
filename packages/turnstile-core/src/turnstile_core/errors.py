@@ -31,3 +31,7 @@ class RegistryResolutionError(TurnstileError):
 
 class InheritanceError(TurnstileError):
     """Error resolving process definition inheritance."""
+
+
+class SubprocessError(TurnstileError):
+    """Error in subprocess delegation."""

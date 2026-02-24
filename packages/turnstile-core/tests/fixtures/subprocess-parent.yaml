@@ -1,0 +1,38 @@
+name: deploy-pipeline
+description: "Deployment with integration testing subprocess"
+version: "1.0.0"
+
+parameters:
+  - name: deploy_target
+    description: "Deployment target environment"
+    required: true
+
+states:
+  - id: start
+    type: initial
+    transitions: [build]
+
+  - id: build
+    description: "Build artifacts"
+    transitions: [test]
+
+  - id: test
+    type: subprocess
+    description: "Run integration tests via subprocess"
+    process: integration-tests
+    parameter_map:
+      target_env: "${deploy_target}"
+    subprocess_routing:
+      on_complete: [deploy]
+      on_fail: [rollback]
+
+  - id: deploy
+    description: "Deploy to production"
+    transitions: [done]
+
+  - id: rollback
+    description: "Rollback on test failure"
+    transitions: [done]
+
+  - id: done
+    type: terminal

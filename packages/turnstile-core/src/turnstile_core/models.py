@@ -135,6 +135,13 @@ class StateHooks(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class SubprocessRouting(BaseModel):
+    """Routing targets for subprocess state completion/failure."""
+
+    on_complete: list[str] = Field(default_factory=list)
+    on_fail: list[str] = Field(default_factory=list)
+
+
 class ProcessState(BaseModel):
     """A single state in the process state machine."""
 
@@ -149,6 +156,31 @@ class ProcessState(BaseModel):
     # Subprocess-specific fields
     process: str | None = None
     parameter_map: dict[str, str] | None = None
+    subprocess_routing: SubprocessRouting | None = None
+
+    @model_validator(mode="after")
+    def _check_subprocess_fields(self) -> ProcessState:
+        if self.type == StateType.subprocess:
+            if not self.process:
+                raise ValueError(
+                    f"Subprocess state '{self.id}' must have 'process' field"
+                )
+            if self.transitions:
+                raise ValueError(
+                    f"Subprocess state '{self.id}' must not have 'transitions' "
+                    f"(use subprocess_routing instead)"
+                )
+            if not self.subprocess_routing:
+                raise ValueError(
+                    f"Subprocess state '{self.id}' must have 'subprocess_routing'"
+                )
+        else:
+            if self.subprocess_routing is not None:
+                raise ValueError(
+                    f"Non-subprocess state '{self.id}' must not have "
+                    f"'subprocess_routing'"
+                )
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +246,22 @@ class ProcessDefinition(BaseModel):
                         f"State '{state.id}' has transition to unknown "
                         f"state '{target}'"
                     )
+
+        # Subprocess routing targets must reference existing states
+        for state in self.states:
+            if state.subprocess_routing:
+                for target in state.subprocess_routing.on_complete:
+                    if target not in state_ids:
+                        raise ValueError(
+                            f"Subprocess state '{state.id}' on_complete "
+                            f"references unknown state '{target}'"
+                        )
+                for target in state.subprocess_routing.on_fail:
+                    if target not in state_ids:
+                        raise ValueError(
+                            f"Subprocess state '{state.id}' on_fail "
+                            f"references unknown state '{target}'"
+                        )
 
         # Terminal states must not have transitions
         for state in self.states:
