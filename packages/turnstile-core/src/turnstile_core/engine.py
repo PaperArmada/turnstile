@@ -16,6 +16,7 @@ from turnstile_core.errors import (
     DefinitionError,
     InstanceNotFoundError,
     ProcessNotFoundError,
+    SubprocessError,
     TransitionError,
 )
 from turnstile_core.loader import (
@@ -51,6 +52,11 @@ class TransitionResult:
     validation_results: list[dict[str, Any]] = field(default_factory=list)
     available_transitions: list[str] = field(default_factory=list)
     message: str = ""
+    # Subprocess delegation info
+    subprocess_started: str | None = None  # child instance_id if subprocess started
+    parent_resumed: bool = False
+    parent_instance_id: str | None = None
+    parent_available_transitions: list[str] = field(default_factory=list)
 
 
 def _vr_to_dict(vr: ValidationResult) -> dict[str, Any]:
@@ -161,7 +167,7 @@ class Engine:
             instance = self._store.load(instance_id)
             defn, _ = self._get_definition(instance.process_name)
             state = defn.get_state(instance.current_state)
-            return {
+            info: dict[str, Any] = {
                 "instance_id": instance.instance_id,
                 "process_name": instance.process_name,
                 "current_state": instance.current_state,
@@ -170,7 +176,13 @@ class Engine:
                 "updated_at": instance.updated_at,
                 "parameters": instance.parameters,
                 "history_length": len(instance.history),
+                "suspended": instance.suspended,
             }
+            if instance.suspended:
+                info["child_instance_id"] = instance.child_instance_id
+            if instance.parent_instance_id:
+                info["parent_instance_id"] = instance.parent_instance_id
+            return info
 
         instances = self._store.list_active()
         result = []
@@ -180,14 +192,20 @@ class Engine:
             if defn_entry:
                 state = defn_entry[0].get_state(inst.current_state)
                 transitions = state.transitions if state else []
-            result.append({
+            entry: dict[str, Any] = {
                 "instance_id": inst.instance_id,
                 "process_name": inst.process_name,
                 "current_state": inst.current_state,
                 "available_transitions": transitions,
                 "started_at": inst.started_at,
                 "updated_at": inst.updated_at,
-            })
+                "suspended": inst.suspended,
+            }
+            if inst.suspended:
+                entry["child_instance_id"] = inst.child_instance_id
+            if inst.parent_instance_id:
+                entry["parent_instance_id"] = inst.parent_instance_id
+            result.append(entry)
         return result
 
     async def transition(
@@ -195,6 +213,15 @@ class Engine:
     ) -> TransitionResult:
         """Attempt a legal transition to a new state."""
         instance = self._store.load(instance_id)
+
+        # Block transitions on suspended instances
+        if instance.suspended:
+            raise TransitionError(
+                f"Instance is suspended waiting for subprocess "
+                f"'{instance.child_instance_id}'. Complete or abandon "
+                f"the child process first."
+            )
+
         defn, _ = self._get_definition(instance.process_name)
 
         current = defn.get_state(instance.current_state)
@@ -204,7 +231,19 @@ class Engine:
             )
 
         # Check transition is legal
-        if target_state not in current.transitions:
+        # For subprocess states, check routing targets instead of transitions
+        if current.type == StateType.subprocess and current.subprocess_routing:
+            all_targets = (
+                current.subprocess_routing.on_complete
+                + current.subprocess_routing.on_fail
+            )
+            if target_state not in all_targets:
+                raise TransitionError(
+                    f"Transition from subprocess state '{current.id}' to "
+                    f"'{target_state}' is not allowed. "
+                    f"Legal targets: {all_targets}"
+                )
+        elif target_state not in current.transitions:
             raise TransitionError(
                 f"Transition from '{current.id}' to '{target_state}' is not allowed. "
                 f"Legal transitions: {current.transitions}"
@@ -273,23 +312,151 @@ class Engine:
                 except Exception:
                     pass  # Actions are best-effort
 
+        # Handle subprocess states
+        if target.type == StateType.subprocess:
+            child_result = self._start_subprocess(instance, target)
+            self._store.save(instance)
+
+            self._store.append_log(
+                f"TRANSITION {instance.process_name}-{instance.instance_id}: "
+                f"{history_entry.from_state} -> {target_state} "
+                f"(subprocess {child_result['instance_id']} started)"
+            )
+
+            return TransitionResult(
+                success=True,
+                new_state=target_state,
+                validation_results=[_vr_to_dict(r) for r in all_results],
+                available_transitions=[],
+                message=f"Subprocess '{target.process}' started",
+                subprocess_started=child_result["instance_id"],
+            )
+
         # Handle terminal states
         if target.type == StateType.terminal:
             self._store.complete(instance)
+            # Check if this child completing should resume a parent
+            parent_info = self._resume_parent(instance, "completed")
         else:
             self._store.save(instance)
+            parent_info = None
 
         self._store.append_log(
             f"TRANSITION {instance.process_name}-{instance.instance_id}: "
             f"{history_entry.from_state} -> {target_state}"
         )
 
-        return TransitionResult(
+        result = TransitionResult(
             success=True,
             new_state=target_state,
             validation_results=[_vr_to_dict(r) for r in all_results],
             available_transitions=target.transitions,
         )
+
+        if parent_info:
+            result.parent_resumed = True
+            result.parent_instance_id = parent_info["parent_instance_id"]
+            result.parent_available_transitions = parent_info["available_transitions"]
+
+        return result
+
+    def _start_subprocess(
+        self, parent: ProcessInstance, state: ProcessState
+    ) -> dict[str, Any]:
+        """Start a child process for a subprocess state."""
+        # Build child parameters from parameter_map
+        child_params: dict[str, str] = {}
+        if state.parameter_map:
+            for child_key, template in state.parameter_map.items():
+                child_params[child_key] = substitute_params(
+                    template, parent.parameters
+                )
+
+        # Start the child process
+        child_defn, child_hash = self._get_definition(state.process)
+        for p in child_defn.parameters:
+            if p.required and p.name not in child_params:
+                raise SubprocessError(
+                    f"Subprocess '{state.process}' requires parameter "
+                    f"'{p.name}' but it is not in parameter_map"
+                )
+            if p.name not in child_params and p.default is not None:
+                child_params[p.name] = p.default
+
+        initial = child_defn.initial_state()
+        child_instance = self._store.create(
+            process_name=child_defn.name,
+            initial_state=initial.id,
+            version=child_defn.version,
+            definition_hash=child_hash,
+            parameters=child_params,
+        )
+
+        # Link parent and child
+        child_instance.parent_instance_id = parent.instance_id
+        child_instance.parent_state_id = state.id
+        self._store.save(child_instance)
+
+        parent.child_instance_id = child_instance.instance_id
+        parent.suspended = True
+
+        self._store.append_log(
+            f"SUBPROCESS {parent.process_name}-{parent.instance_id}: "
+            f"started {child_defn.name}-{child_instance.instance_id} "
+            f"at state '{state.id}'"
+        )
+
+        return {
+            "instance_id": child_instance.instance_id,
+            "process_name": child_instance.process_name,
+            "current_state": child_instance.current_state,
+            "available_transitions": initial.transitions,
+        }
+
+    def _resume_parent(
+        self, child: ProcessInstance, outcome: str
+    ) -> dict[str, Any] | None:
+        """Resume a parent after subprocess completion or abandonment.
+
+        Returns parent info dict if a parent was resumed, None otherwise.
+        """
+        if not child.parent_instance_id:
+            return None
+
+        try:
+            parent = self._store.load(child.parent_instance_id)
+        except InstanceNotFoundError:
+            return None
+
+        if not parent.suspended:
+            return None
+
+        parent_defn, _ = self._get_definition(parent.process_name)
+        subprocess_state = parent_defn.get_state(parent.current_state)
+
+        if subprocess_state is None or not subprocess_state.subprocess_routing:
+            return None
+
+        routing = subprocess_state.subprocess_routing
+        if outcome == "completed":
+            available = routing.on_complete
+        else:
+            available = routing.on_fail
+
+        parent.suspended = False
+        parent.child_instance_id = None
+        self._store.save(parent)
+
+        self._store.append_log(
+            f"SUBPROCESS_DONE {parent.process_name}-{parent.instance_id}: "
+            f"child {child.process_name}-{child.instance_id} {outcome}, "
+            f"available transitions: {available}"
+        )
+
+        return {
+            "parent_instance_id": parent.instance_id,
+            "available_transitions": available,
+        }
 
     async def skip(
         self, instance_id: str, target_state: str, reason: str
@@ -348,11 +515,21 @@ class Engine:
         instance = self._store.load(instance_id)
         final_state = instance.current_state
         self._store.abandon(instance, reason)
-        return {
+
+        result: dict[str, Any] = {
             "success": True,
             "final_state": final_state,
             "reason": reason,
         }
+
+        # If this was a child process, resume the parent
+        parent_info = self._resume_parent(instance, "abandoned")
+        if parent_info:
+            result["parent_resumed"] = True
+            result["parent_instance_id"] = parent_info["parent_instance_id"]
+            result["parent_available_transitions"] = parent_info["available_transitions"]
+
+        return result
 
     def undo(self, instance_id: str, reason: str) -> TransitionResult:
         """Revert the last transition (administrative correction).

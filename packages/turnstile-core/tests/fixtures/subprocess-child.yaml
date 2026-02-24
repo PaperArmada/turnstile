@@ -1,0 +1,23 @@
+name: integration-tests
+description: "Run integration test suite"
+version: "1.0.0"
+
+parameters:
+  - name: target_env
+    description: "Environment to test against"
+    required: true
+
+states:
+  - id: start
+    type: initial
+    transitions: [run]
+
+  - id: run
+    description: "Execute integration tests"
+    transitions: [done, failed]
+
+  - id: done
+    type: terminal
+
+  - id: failed
+    type: terminal
