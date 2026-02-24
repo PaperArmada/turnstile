@@ -1,0 +1,34 @@
+name: release
+description: "Standard release process"
+version: "1.0.0"
+
+parameters:
+  - name: branch_name
+    description: "Release branch"
+    required: true
+
+states:
+  - id: start
+    type: initial
+    transitions: [test]
+
+  - id: test
+    description: "Run test suite"
+    transitions: [deploy]
+    on_exit:
+      validate:
+        - command: "echo pass"
+          expect: not_empty
+          message: "Tests must pass"
+
+  - id: deploy
+    description: "Deploy to production"
+    transitions: [done]
+    on_enter:
+      validate:
+        - command: "echo ready"
+          expect: not_empty
+          message: "Must be ready to deploy"
+
+  - id: done
+    type: terminal

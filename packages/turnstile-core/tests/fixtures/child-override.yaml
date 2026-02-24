@@ -1,0 +1,26 @@
+extends: "release"
+name: release
+version: "1.1.0"
+description: "Release process with security scan"
+
+overrides:
+  add_states:
+    - id: security_scan
+      description: "Run security scanning"
+      transitions: [deploy]
+      on_exit:
+        validate:
+          - command: "echo clean"
+            expect: not_empty
+            message: "No high-severity findings"
+
+  patch_states:
+    - id: test
+      transitions: [security_scan]
+
+  parameters:
+    append:
+      - name: scan_profile
+        description: "Security scan profile"
+        required: false
+        default: "standard"

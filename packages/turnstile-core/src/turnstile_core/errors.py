@@ -27,3 +27,7 @@ class ProcessNotFoundError(TurnstileError):
 
 class RegistryResolutionError(TurnstileError):
     """Failed to resolve an external process source."""
+
+
+class InheritanceError(TurnstileError):
+    """Error resolving process definition inheritance."""
