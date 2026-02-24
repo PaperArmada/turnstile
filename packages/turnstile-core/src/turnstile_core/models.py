@@ -307,6 +307,16 @@ class RegistrySettings(BaseModel):
     log_retention_days: int = 90
     require_override_reason: bool = True
     notifications: dict[str, str] = Field(default_factory=dict)
+    enforcement: str = "off"  # off, monitor, enforce
+
+    @model_validator(mode="after")
+    def _validate_enforcement(self) -> RegistrySettings:
+        if self.enforcement not in ("off", "monitor", "enforce"):
+            raise ValueError(
+                f"enforcement must be 'off', 'monitor', or 'enforce', "
+                f"got '{self.enforcement}'"
+            )
+        return self
 
 
 class RegistryConfig(BaseModel):

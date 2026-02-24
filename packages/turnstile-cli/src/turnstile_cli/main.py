@@ -8,8 +8,14 @@ from pathlib import Path
 import click
 
 from turnstile_core.engine import Engine
+from turnstile_core.guard import (
+    check_enforcement,
+    install_enforcement,
+    run_guard,
+    update_registry_enforcement,
+)
 from turnstile_core.hooks import generate_hook, install_hook, uninstall_hook
-from turnstile_core.loader import load_definition
+from turnstile_core.loader import load_definition, load_registry
 from turnstile_core.schema import export_schemas
 from turnstile_core.template import scaffold_package
 
@@ -437,6 +443,92 @@ def init_package(name: str, processes: tuple[str, ...], output: str | None) -> N
     click.echo(f"\nNext steps:")
     click.echo(f"  1. Edit the process definitions in {out_dir}/src/")
     click.echo(f"  2. Build and publish: cd {out_dir} && uv build")
+
+
+@cli.command()
+def guard() -> None:
+    """Run the enforcement guard (called by Claude Code hooks).
+
+    Reads a JSON hook payload from stdin, checks whether an active
+    turnstile process exists, and outputs a hook response. This command
+    is not meant to be run manually; it is invoked by the Claude Code
+    PreToolUse hook.
+    """
+    run_guard()
+
+
+@cli.group()
+def enforce() -> None:
+    """Manage enforcement mode."""
+
+
+@enforce.command("status")
+@click.pass_context
+def enforce_status(ctx: click.Context) -> None:
+    """Show the current enforcement mode."""
+    root = Path(ctx.obj["project"]) if ctx.obj.get("project") else Path.cwd()
+    registry = load_registry(root)
+    mode = registry.settings.enforcement
+    click.echo(f"Enforcement mode: {mode}")
+
+    # Check .claude/settings.json for hook
+    settings_path = root / ".claude" / "settings.json"
+    if settings_path.exists():
+        settings = json.loads(settings_path.read_text())
+        pre_tool = settings.get("hooks", {}).get("PreToolUse", [])
+        has_hook = any(
+            "turnstile guard" in hk.get("command", "")
+            for entry in pre_tool
+            for hk in entry.get("hooks", [])
+        )
+        if has_hook:
+            click.echo("Claude Code hook: installed")
+        else:
+            click.echo("Claude Code hook: not installed")
+    else:
+        click.echo("Claude Code hook: not installed (.claude/settings.json missing)")
+
+
+@enforce.command("on")
+@click.option(
+    "--turnstile-dir",
+    default=None,
+    help="Path to turnstile repo (auto-detected if omitted).",
+)
+@click.pass_context
+def enforce_on(ctx: click.Context, turnstile_dir: str | None) -> None:
+    """Enable enforcement (blocks file mutations without an active process)."""
+    root = Path(ctx.obj["project"]) if ctx.obj.get("project") else Path.cwd()
+    update_registry_enforcement(root, "enforce")
+    result = install_enforcement(root, "enforce", turnstile_dir)
+    click.echo(f"Enforcement enabled: {result['message']}")
+    click.echo(f"  Settings: {result.get('settings_path', 'N/A')}")
+
+
+@enforce.command("monitor")
+@click.option(
+    "--turnstile-dir",
+    default=None,
+    help="Path to turnstile repo (auto-detected if omitted).",
+)
+@click.pass_context
+def enforce_monitor(ctx: click.Context, turnstile_dir: str | None) -> None:
+    """Enable monitor mode (warns but allows mutations without a process)."""
+    root = Path(ctx.obj["project"]) if ctx.obj.get("project") else Path.cwd()
+    update_registry_enforcement(root, "monitor")
+    result = install_enforcement(root, "monitor", turnstile_dir)
+    click.echo(f"Monitor mode enabled: {result['message']}")
+    click.echo(f"  Settings: {result.get('settings_path', 'N/A')}")
+
+
+@enforce.command("off")
+@click.pass_context
+def enforce_off(ctx: click.Context) -> None:
+    """Disable enforcement and remove the Claude Code hook."""
+    root = Path(ctx.obj["project"]) if ctx.obj.get("project") else Path.cwd()
+    update_registry_enforcement(root, "off")
+    result = install_enforcement(root, "off")
+    click.echo(f"Enforcement disabled: {result['message']}")
 
 
 if __name__ == "__main__":
