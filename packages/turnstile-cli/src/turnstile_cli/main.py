@@ -84,5 +84,71 @@ def status(ctx: click.Context, show_all: bool) -> None:
             )
 
 
+@cli.command()
+@click.argument("name")
+@click.pass_context
+def graph(ctx: click.Context, name: str) -> None:
+    """Generate a Mermaid state diagram for a process."""
+    engine = _get_engine(ctx.obj["project"])
+    result = engine.graph(name)
+    click.echo(result["mermaid_source"])
+
+
+@cli.command("dry-run")
+@click.argument("name")
+@click.option(
+    "--path",
+    "-s",
+    "state_path",
+    multiple=True,
+    help="Simulate a specific path (repeat for each state).",
+)
+@click.pass_context
+def dry_run(ctx: click.Context, name: str, state_path: tuple[str, ...]) -> None:
+    """Simulate a process execution without running commands."""
+    engine = _get_engine(ctx.obj["project"])
+    path = list(state_path) if state_path else None
+    steps = engine.dry_run(name, path)
+
+    for step in steps:
+        if "step" in step:
+            # Path simulation
+            legal = "OK" if step["legal"] else "ILLEGAL"
+            click.echo(
+                f"  {step['step']}. {step['from_state']} -> "
+                f"{step['to_state']} [{legal}]"
+            )
+        else:
+            # Full description
+            marker = ""
+            if step["type"] == "initial":
+                marker = " [initial]"
+            elif step["type"] == "terminal":
+                marker = " [terminal]"
+            click.echo(f"  {step['state']}{marker}")
+            if step["description"]:
+                click.echo(f"    {step['description']}")
+
+        # Show validations
+        for phase in ("on_enter", "on_exit"):
+            vals = step.get(f"{phase}_validations", [])
+            if vals:
+                click.echo(f"    {phase}:")
+                for v in vals:
+                    if v["type"].startswith("composite_"):
+                        click.echo(
+                            f"      {v['type']}: {v['message']} "
+                            f"({len(v['rules'])} rules)"
+                        )
+                    else:
+                        click.echo(
+                            f"      [{v['severity']}] {v['message'] or v['command']}"
+                        )
+
+        # Show transitions for full description mode
+        if "transitions" in step and step.get("transitions"):
+            click.echo(f"    -> {', '.join(step['transitions'])}")
+
+
 if __name__ == "__main__":
     cli()

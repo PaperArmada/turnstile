@@ -209,6 +209,40 @@ async def process_validate_definition(path: str) -> dict[str, Any]:
     return engine.validate_definition(path)
 
 
+@mcp.tool()
+async def process_graph(name: str) -> dict[str, Any]:
+    """Generate a Mermaid state diagram for a process definition.
+
+    Returns Mermaid source that can be rendered in any Mermaid viewer,
+    GitHub markdown, or VS Code preview.
+
+    Args:
+        name: The name of the process definition.
+    """
+    engine = _get_engine()
+    return engine.graph(name)
+
+
+@mcp.tool()
+async def process_dry_run(
+    name: str, path: list[str] | None = None
+) -> list[dict[str, Any]]:
+    """Simulate a process execution without running any commands.
+
+    Shows what validations would run at each gate and what transitions
+    are available. No state changes, no shell commands executed.
+
+    If path is provided, simulates that specific sequence of transitions.
+    Otherwise, describes every state in the definition.
+
+    Args:
+        name: The name of the process definition.
+        path: Optional list of state IDs to simulate walking through.
+    """
+    engine = _get_engine()
+    return engine.dry_run(name, path)
+
+
 def main():
     """Entry point for the MCP server."""
     mcp.run(transport="stdio")
