@@ -1,0 +1,156 @@
+name: heist
+description: "Plan and execute a museum heist. Choose your approach wisely."
+version: "1.0.0"
+
+metadata:
+  author: "danny-ocean"
+  tags: ["toy", "branching", "multi-terminal"]
+
+parameters:
+  - name: codename
+    description: "Operation codename"
+    required: true
+  - name: crew_size
+    description: "Number of crew members"
+    required: true
+  - name: target
+    description: "What you're stealing"
+    required: false
+    default: "the Mona Lisa"
+
+states:
+  - id: planning
+    type: initial
+    description: "Assemble intel on the target. Decide if it's worth the risk."
+    transitions: [recruit]
+    on_exit:
+      validate:
+        - command: "echo ${crew_size}"
+          expect: greater_than(1)
+          message: "You can't pull a heist alone. Need at least 2 crew members."
+          severity: error
+
+  - id: recruit
+    description: "Recruit your crew. Each member needs a specialty."
+    transitions: [recon, planning]
+    metadata:
+      hint: "Go back to planning if the crew doesn't feel right."
+
+  - id: recon
+    description: "Case the museum. Map guard rotations, cameras, entry points."
+    transitions: [choose_approach, recruit]
+    on_exit:
+      validate:
+        - command: "shuf -i 1-10 -n 1"
+          expect: greater_than(3)
+          message: "Recon was spotted! Guards are on alert. (70% chance to pass)"
+          severity: error
+        - command: "echo ok"
+          expect: not_empty
+          message: "Basic situational awareness check"
+          severity: info
+
+  - id: choose_approach
+    description: "Pick your entry strategy. This determines the rest of the heist."
+    transitions: [stealth_entry, loud_entry, tunnel_entry]
+    metadata:
+      hint: "stealth_entry is quiet but needs perfect timing. loud_entry is fast but risky. tunnel_entry is slow but safe."
+
+  - id: stealth_entry
+    description: "Infiltrate through the ventilation system. Requires precise timing."
+    transitions: [vault, alarm_triggered]
+    on_enter:
+      validate:
+        - command: "echo ${crew_size}"
+          expect: less_than(5)
+          message: "Stealth requires a small crew (4 or fewer)"
+          severity: error
+    on_exit:
+      validate:
+        - command: "shuf -i 1-10 -n 1"
+          expect: greater_than(2)
+          message: "A crew member sneezed in the vent. (80% chance to pass)"
+          severity: error
+
+  - id: loud_entry
+    description: "Blow the front door. Fast and dramatic."
+    transitions: [vault, alarm_triggered]
+    on_enter:
+      validate:
+        - command: "echo ${crew_size}"
+          expect: greater_than(3)
+          message: "Going loud requires at least 4 crew to control the scene"
+          severity: error
+    on_exit:
+      validate:
+        - command: "shuf -i 1-6 -n 1"
+          expect: greater_than(2)
+          message: "The explosives were too loud. Cops respond faster than expected. (66% chance to pass)"
+          severity: error
+
+  - id: tunnel_entry
+    description: "Dig a tunnel from the sewer. Takes time but avoids all security."
+    transitions: [vault]
+    on_enter:
+      validate:
+        - any:
+            - command: "echo ${crew_size}"
+              expect: greater_than(2)
+              message: "Enough crew to dig"
+            - command: "test -f /usr/bin/yes && echo found || echo missing"
+              expect: contains("found")
+              message: "Automated digging equipment available"
+          message: "Need either 3+ crew or automated digging equipment"
+
+  - id: alarm_triggered
+    description: "The alarm is going off! You have 60 seconds."
+    transitions: [vault, escape_chase, busted]
+    metadata:
+      hint: "vault if you're close, escape_chase to run, busted to surrender"
+    on_exit:
+      validate:
+        - command: "shuf -i 1-10 -n 1"
+          expect: greater_than(4)
+          message: "The pressure is too much. Crew is panicking. (60% chance to pass)"
+          severity: error
+
+  - id: vault
+    description: "You're at the vault. Crack it open and grab ${target}."
+    transitions: [escape_clean, escape_chase]
+    on_enter:
+      validate:
+        - command: "python3 -c \"import random; print('cracked' if random.random() > 0.15 else 'jammed')\""
+          expect: equals("cracked")
+          message: "Vault combination failed! (85% chance to crack)"
+          severity: error
+    on_exit:
+      actions:
+        - command: "echo '[$(date)] Operation ${codename}: ${target} acquired from vault' >> /tmp/heist-log.txt"
+
+  - id: escape_clean
+    description: "Clean getaway. Walk out the back, van is waiting."
+    transitions: [celebration]
+
+  - id: escape_chase
+    description: "Police pursuit! Weave through the city streets."
+    transitions: [celebration, busted]
+    on_exit:
+      validate:
+        - command: "shuf -i 1-10 -n 1"
+          expect: greater_than(3)
+          message: "The driver took a wrong turn into a dead end. (70% chance to escape)"
+          severity: error
+
+  - id: celebration
+    type: terminal
+    description: "The crew splits the take. ${codename} goes down in history."
+    on_enter:
+      actions:
+        - command: "echo '[$(date)] Operation ${codename}: SUCCESS - ${target} secured, crew of ${crew_size}' >> /tmp/heist-log.txt"
+
+  - id: busted
+    type: terminal
+    description: "Cuffed and stuffed. The crew does 10-20 in federal prison."
+    on_enter:
+      actions:
+        - command: "echo '[$(date)] Operation ${codename}: BUSTED - ${target} recovered by police' >> /tmp/heist-log.txt"
