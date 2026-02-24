@@ -4,11 +4,11 @@ A local, single-user process enforcement engine for AI agent workflows.
 
 Turnstile is a deterministic state machine that sits between developer intent and agent execution. It enforces multi-step procedures by requiring agents to advance through defined states, running validation gates at each transition, and rejecting illegal moves. Process definitions are YAML files in your repository. State is persisted to disk and survives session restarts.
 
-Exposed as an MCP server for use with Claude Code (or any MCP-compatible client).
+Exposed as an MCP server for use with Claude Code (or any MCP-compatible client), with a CLI for validation, CI integration, and administration.
 
 ## How It Works
 
-1. You define a process as a YAML file describing states, transitions, and validation gates
+1. Define a process as a YAML file describing states, transitions, and validation gates
 2. An agent (or human) starts an instance of that process
 3. The engine tracks the current state and only allows legal transitions
 4. Validation gates run shell commands and check their output before allowing transitions
@@ -24,7 +24,7 @@ cd turnstile
 uv sync --all-packages
 ```
 
-## Using Turnstile in Your Project
+## Quick Start
 
 ### 1. Create a process definition
 
@@ -95,28 +95,11 @@ Add a `.mcp.json` to your project root:
 }
 ```
 
-Replace `/path/to/turnstile` with the absolute path to your turnstile clone.
-
-Restart Claude Code. The process tools will be available automatically.
+Replace `/path/to/turnstile` with the absolute path to your turnstile clone. Restart Claude Code and the process tools will be available automatically.
 
 ### 3. Use the tools
 
-Once registered, the following tools are available in conversation:
-
-| Tool | Purpose |
-|------|---------|
-| `process_list` | Show available process definitions |
-| `process_start` | Start a new process instance |
-| `process_status` | Check active instances and their current state |
-| `process_transition` | Move to the next state (runs validation gates) |
-| `process_skip` | Force-skip a state with a logged reason |
-| `process_abandon` | Abandon a process instance |
-| `process_undo` | Revert the last transition |
-| `process_handoff` | Transfer ownership (metadata) |
-| `process_history` | View full transition history |
-| `process_validate_definition` | Validate a YAML file against the schema |
-
-A typical session looks like:
+A typical session:
 
 ```
 You: Start the feature-deploy process for branch auth-refactor
@@ -136,36 +119,75 @@ You: Skip straight to done, the reviewer approved in Slack
 Agent: [calls process_skip with reason] Skipped to "done". Override logged.
 ```
 
-### 4. State persistence
+## MCP Tools
 
-Process state is stored in `.process-state/` (add to `.gitignore`):
+| Tool | Purpose |
+|------|---------|
+| `process_list` | Show available process definitions |
+| `process_start` | Start a new process instance |
+| `process_status` | Check active instances and their current state |
+| `process_transition` | Move to the next state (runs validation gates) |
+| `process_skip` | Force-skip a state with a logged reason |
+| `process_abandon` | Abandon a process instance |
+| `process_undo` | Revert the last transition |
+| `process_handoff` | Transfer ownership (metadata) |
+| `process_history` | View full transition history |
+| `process_validate_definition` | Validate a YAML file against the schema |
+| `process_graph` | Generate a Mermaid state diagram |
+| `process_dry_run` | Simulate a process without executing commands |
+| `process_diff` | Compare two process definition files |
+| `process_migrate` | Check if an in-flight instance needs migration |
+| `process_analytics` | Compute stats from archived instances |
+| `process_check_completed` | Verify a process was completed (for CI/hooks) |
 
+## CLI
+
+```bash
+# Validate a process definition
+turnstile validate .processes/feature-deploy.yaml
+
+# List available processes
+turnstile list
+
+# Show active instances
+turnstile status
+turnstile status --all
+
+# Generate a Mermaid state diagram
+turnstile graph feature-deploy
+
+# Simulate a process execution
+turnstile dry-run feature-deploy
+turnstile dry-run feature-deploy --path start --path implement --path test
+
+# Export JSON Schema for editor autocomplete
+turnstile schema
+turnstile schema --output ./schemas/
+
+# Check process completion (for CI pipelines)
+turnstile check-completed feature-deploy --state merge
+turnstile check-completed feature-deploy -P branch_name=main -s review --json
+
+# Process analytics
+turnstile analytics
+turnstile analytics --json
+
+# Git hook management
+turnstile hooks install pre-push -p feature-deploy:merge
+turnstile hooks show pre-push -p feature-deploy:merge
+turnstile hooks uninstall pre-push
+
+# Scaffold a shared process package
+turnstile init-package my-processes -P release -P review
 ```
-.process-state/
-  active/          # Currently running instances
-  completed/       # Finished instances (archived by month)
-  abandoned/       # Abandoned instances (archived by month)
-  log.txt          # Append-only event log
+
+All commands accept `--project / -p` to specify the project root (defaults to CWD).
+
+When running from the turnstile repo itself, prefix with `uv run --package turnstile-cli`:
+
+```bash
+uv run --package turnstile-cli turnstile validate .processes/feature-deploy.yaml
 ```
-
-Each instance is a JSON file containing the current state, full history, parameters, and any overrides.
-
-### 5. Optional registry
-
-For projects with multiple process definitions, create a `.processes/registry.yaml`:
-
-```yaml
-version: "1.0"
-local:
-  - feature-deploy
-  - hotfix
-settings:
-  state_dir: .process-state
-  require_override_reason: true
-  log_retention_days: 90
-```
-
-Without a registry, turnstile auto-discovers all `.yaml` files in `.processes/`.
 
 ## Process Definition Reference
 
@@ -192,7 +214,7 @@ states:
     type: terminal         # no transitions allowed
 ```
 
-### Validation gates
+### Validation Gates
 
 Gates run a shell command and check its output:
 
@@ -205,47 +227,43 @@ validate:
     timeout: 60            # seconds, default 60
 ```
 
-#### Expect expressions
+#### Expect Expressions
 
 | Expression | Checks |
 |---|---|
 | `empty` | stdout is empty |
 | `not_empty` | stdout is not empty |
-| `equals("value")` | stdout equals value exactly |
-| `not_equals("value")` | stdout does not equal value |
-| `contains("substring")` | stdout contains substring |
-| `starts_with("prefix")` | stdout starts with prefix |
-| `ends_with("suffix")` | stdout ends with suffix |
-| `matches("regex")` | stdout matches regex pattern |
-| `greater_than(N)` | stdout as integer > N |
-| `less_than(N)` | stdout as integer < N |
-| `exit_code(N)` | process exit code equals N |
+| `equals("value")` | exact match |
+| `not_equals("value")` | not equal |
+| `contains("substring")` | substring match |
+| `starts_with("prefix")` | prefix match |
+| `ends_with("suffix")` | suffix match |
+| `matches("regex")` | regex match |
+| `greater_than(N)` | numeric comparison |
+| `less_than(N)` | numeric comparison |
+| `exit_code(N)` | process exit code |
 
-#### Composite assertions
+#### Composite Assertions
 
 ```yaml
 validate:
   - any:                   # OR: at least one must pass
       - command: "test -f coverage.xml"
         expect: exit_code(0)
-        message: "coverage.xml exists"
       - command: "test -f coverage.json"
         expect: exit_code(0)
-        message: "coverage.json exists"
     message: "Need at least one coverage report"
 
   - all:                   # AND: all must pass
       - command: "echo check1"
         expect: not_empty
-        message: "first check"
       - command: "echo check2"
         expect: not_empty
-        message: "second check"
 ```
 
 ### Parameters
 
-Process definitions can declare parameters that are substituted into commands:
+Parameters are substituted into commands using `${var_name}` syntax:
 
 ```yaml
 parameters:
@@ -263,7 +281,7 @@ states:
         - command: "echo 'Deployed ${branch_name} for ${ticket_id}'"
 ```
 
-### Evidence-based validation
+### Evidence-Based Validation
 
 Check that a file exists and is recent enough:
 
@@ -276,27 +294,140 @@ validate:
     max_age: 30m           # 30m, 1h, 90s
 ```
 
-## CLI
+### Subprocess Delegation
+
+A state can delegate to another process definition. The parent is suspended until the child completes or is abandoned:
+
+```yaml
+states:
+  - id: test
+    type: subprocess
+    process: integration-tests
+    parameter_map:
+      target_env: "${deploy_target}"
+    subprocess_routing:
+      on_complete: [deploy]     # where parent goes when child finishes
+      on_fail: [rollback]       # where parent goes if child is abandoned
+```
+
+## Registry
+
+For projects with multiple definitions or external sources, create `.processes/registry.yaml`:
+
+```yaml
+version: "1.0"
+
+extends:
+  - source: "./shared-processes"           # local directory
+  - source: "git+https://github.com/org/processes.git@v2"  # git repo
+  - source: "acme-processes"               # Python package (entry point)
+    processes: [release, deploy]            # optional filter
+
+local:
+  - feature-deploy
+  - hotfix
+
+settings:
+  state_dir: .process-state
+  require_override_reason: true
+  log_retention_days: 90
+  notifications:
+    on_complete: "echo 'Process {name} completed' >> .process-state/log.txt"
+    on_override: "echo 'OVERRIDE: {step} skipped by {user}: {reason}' >> .process-state/log.txt"
+```
+
+Without a registry, turnstile auto-discovers all `.yaml` files in `.processes/`.
+
+### Inheritance and Overrides
+
+Override an inherited process definition by placing a YAML file in `.processes/overrides/`:
+
+```yaml
+# .processes/overrides/feature-deploy.yaml
+extends: feature-deploy
+
+overrides:
+  add_states:
+    - id: security_scan
+      description: "Run security checks"
+      transitions: [review]
+      on_enter:
+        validate:
+          - command: "semgrep --config auto ."
+            expect: exit_code(0)
+            message: "Security scan must pass"
+
+  patch_states:
+    - id: test
+      transitions: [security_scan, implement]   # replaces original transitions
+
+  parameters:
+    append:
+      - name: scan_level
+        default: "standard"
+```
+
+### Shared Process Packages
+
+Scaffold a distributable Python package of process definitions:
 
 ```bash
-# Validate a process definition
-uv run --package turnstile-cli turnstile validate .processes/feature-deploy.yaml
-
-# List available processes
-uv run --package turnstile-cli turnstile list
-
-# Show active instances
-uv run --package turnstile-cli turnstile status
-uv run --package turnstile-cli turnstile status --all
+turnstile init-package acme-processes -P release -P review
 ```
+
+This generates a package with a `turnstile.processes` entry point that other projects can install and reference via the registry `extends` field.
+
+## CI Integration
+
+Use `check-completed` in CI pipelines to verify process compliance:
+
+```yaml
+# GitHub Actions
+- name: Verify process completion
+  run: |
+    turnstile check-completed feature-deploy \
+      --parameter branch_name=${{ github.head_ref }} \
+      --state review
+```
+
+Exit code 0 means a matching completed instance was found, 1 means it was not.
+
+### Git Hooks
+
+Install pre-push hooks that enforce process completion before pushing:
+
+```bash
+turnstile hooks install pre-push -p feature-deploy:merge
+```
+
+This generates a hook that calls `turnstile check-completed` and blocks the push if no matching completed instance is found. Turnstile-managed hooks can be safely replaced or uninstalled; existing non-turnstile hooks are backed up.
+
+## State Persistence
+
+Process state is stored in `.process-state/` (add to `.gitignore`):
+
+```
+.process-state/
+  active/          # Currently running instances
+  completed/       # Finished instances (archived by month)
+  abandoned/       # Abandoned instances (archived by month)
+  log.txt          # Append-only event log
+```
+
+Each instance is a JSON file containing the current state, full history, parameters, and any overrides.
 
 ## Project Structure
 
 ```
 packages/
-  turnstile-core/     # Models, loader, validator, persistence, engine
+  turnstile-core/     # Models, loader, validator, persistence, engine,
+                      # analytics, hooks, notifications, inheritance,
+                      # registry, schema, template
   turnstile-mcp/      # MCP server (FastMCP, stdio transport)
   turnstile-cli/      # CLI (Click)
+docs/
+  principles/         # Design principles
+  process-engine-spec.md  # Full specification
 ```
 
 ## Running Tests
