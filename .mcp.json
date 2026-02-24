@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "turnstile": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/home/matt/dev/repurate/turnstile",
+        "run",
+        "--package",
+        "turnstile-mcp",
+        "python",
+        "-m",
+        "turnstile_mcp.server"
+      ]
+    }
+  }
+}

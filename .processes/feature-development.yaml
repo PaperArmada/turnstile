@@ -1,0 +1,41 @@
+name: feature-development
+description: "Standard feature development workflow for the turnstile project"
+version: "0.1.0"
+
+metadata:
+  author: "matt"
+  tags: ["development"]
+
+parameters:
+  - name: feature_name
+    description: "Short name for the feature"
+    required: true
+  - name: issue_id
+    description: "bd issue ID (e.g., ts-abc123)"
+    required: false
+    default: "none"
+
+states:
+  - id: start
+    type: initial
+    transitions: [implement]
+
+  - id: implement
+    description: "Write the feature code"
+    transitions: [test]
+
+  - id: test
+    description: "Run the test suite"
+    transitions: [review, implement]
+    on_exit:
+      validate:
+        - command: "uv run --package turnstile-core pytest packages/turnstile-core/tests/ -q 2>&1; echo $?"
+          expect: ends_with("0")
+          message: "Core test suite must pass"
+
+  - id: review
+    description: "Review the changes"
+    transitions: [done, implement]
+
+  - id: done
+    type: terminal
