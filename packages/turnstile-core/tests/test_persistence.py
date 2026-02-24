@@ -34,8 +34,22 @@ class TestStateStore:
         assert loaded.current_state == "start"
 
     def test_load_missing_raises(self, store: StateStore):
-        with pytest.raises(InstanceNotFoundError):
+        with pytest.raises(InstanceNotFoundError, match="No instance with ID"):
             store.load("nonexistent")
+
+    def test_load_completed_gives_specific_error(self, store: StateStore):
+        instance = store.create("test", "start")
+        iid = instance.instance_id
+        store.complete(instance)
+        with pytest.raises(InstanceNotFoundError, match="completed.*not active"):
+            store.load(iid)
+
+    def test_load_abandoned_gives_specific_error(self, store: StateStore):
+        instance = store.create("test", "start")
+        iid = instance.instance_id
+        store.abandon(instance, "testing")
+        with pytest.raises(InstanceNotFoundError, match="abandoned.*not active"):
+            store.load(iid)
 
     def test_save_updates(self, store: StateStore):
         instance = store.create("test", "start")
