@@ -147,6 +147,16 @@ class TestSkip:
         assert "Override logged" in result.message
 
     @pytest.mark.asyncio
+    async def test_skip_records_reason_in_history(self, engine: Engine):
+        started = engine.start("simple", {"task_name": "test"})
+        iid = started["instance_id"]
+
+        await engine.skip(iid, "review", "urgent hotfix")
+        history = engine.history(iid)
+        skip_entry = history[-1]
+        assert skip_entry["triggered_by"] == "skip: urgent hotfix"
+
+    @pytest.mark.asyncio
     async def test_skip_requires_reason(self, engine: Engine):
         started = engine.start("simple", {"task_name": "test"})
         iid = started["instance_id"]
