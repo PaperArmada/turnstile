@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import click
@@ -38,6 +39,10 @@ def _get_engine(project_root: str | None = None) -> Engine:
 def cli(ctx: click.Context, project: str | None) -> None:
     """Turnstile: process enforcement engine for development workflows."""
     ctx.ensure_object(dict)
+    # When running via `uv --directory`, CWD is the turnstile source repo,
+    # not the consumer project. TURNSTILE_PROJECT_DIR overrides CWD.
+    if project is None:
+        project = os.environ.get("TURNSTILE_PROJECT_DIR")
     ctx.obj["project"] = project
 
 
