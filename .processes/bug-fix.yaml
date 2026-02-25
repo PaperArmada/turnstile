@@ -1,6 +1,6 @@
 name: bug-fix
 description: "Structured bug fix workflow: reproduce, diagnose, fix, verify"
-version: "1.0.0"
+version: "1.1.0"
 
 metadata:
   author: "turnstile"
@@ -18,6 +18,10 @@ parameters:
     description: "Issue tracker ID"
     required: false
     default: "none"
+  - name: test_command
+    description: "Command to run the test suite"
+    required: false
+    default: "pytest"
 
 states:
   - id: start
@@ -26,7 +30,7 @@ states:
 
   - id: reproduce
     description: "Confirm the bug is reproducible before attempting a fix"
-    transitions: [diagnose, done]
+    transitions: [diagnose, abandoned]
     on_enter:
       validate:
         - command: "git log --oneline -5 2>/dev/null || echo 'not a git repo'"
@@ -41,7 +45,7 @@ states:
 
   - id: diagnose
     description: "Understand the root cause before writing a fix"
-    transitions: [fix, reproduce]
+    transitions: [fix, reproduce, abandoned]
     on_enter:
       validate:
         - command: "git diff --stat HEAD 2>/dev/null | tail -1 || echo 'no changes'"
@@ -68,5 +72,20 @@ states:
           message: "Summary of changes"
           severity: info
 
+    on_exit:
+      validate:
+        - command: "${test_command} -q --no-header 2>&1 | tail -1"
+          expect: contains("passed")
+          message: "Test suite must pass"
+
+        - command: "${test_command} -q --no-header 2>&1 | tail -1 | grep -oP '\\d+(?= passed)'"
+          expect: not_empty
+          message: "Test count (verify no regressions)"
+          severity: info
+
   - id: done
     type: terminal
+
+  - id: abandoned
+    type: terminal
+    description: "Bug abandoned (not reproducible, already fixed, or not worth pursuing)"

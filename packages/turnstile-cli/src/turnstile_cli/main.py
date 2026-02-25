@@ -23,6 +23,8 @@ from turnstile_core.loader import load_definition, load_registry
 from turnstile_core.schema import export_schemas
 from turnstile_core.template import scaffold_package
 
+from turnstile_cli.principles import PRINCIPLES
+
 
 TURNSTILE_REPO_URL = "https://github.com/PaperArmada/turnstile.git"
 
@@ -654,6 +656,16 @@ def init(
     if not proc_dir.exists():
         proc_dir.mkdir(parents=True)
         created.append(".processes/")
+
+    # Design principles
+    principles_dir = proc_dir / "principles"
+    if not principles_dir.exists():
+        principles_dir.mkdir(parents=True)
+        written = 0
+        for name, content in PRINCIPLES.items():
+            (principles_dir / f"{name}.md").write_text(content)
+            written += 1
+        created.append(f".processes/principles/ ({written} files)")
 
     # registry.yaml
     registry_path = proc_dir / "registry.yaml"
