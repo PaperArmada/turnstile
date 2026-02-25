@@ -1,10 +1,10 @@
 name: feature-development
-description: "Standard feature development workflow for the turnstile project"
-version: "1.0.0"
+description: "Standard feature development workflow"
+version: "1.1.0"
 
 metadata:
   author: "matt"
-  tags: ["development"]
+  tags: ["starter-pack", "development"]
   principles:
     - progressive-disclosure
     - render-dont-record
@@ -15,9 +15,13 @@ parameters:
     description: "Short name for the feature"
     required: true
   - name: issue_id
-    description: "bd issue ID (e.g., ts-abc)"
+    description: "Issue tracker ID (e.g., ts-abc)"
     required: false
     default: "none"
+  - name: test_command
+    description: "Command to run the test suite"
+    required: false
+    default: "pytest"
 
 states:
   - id: start
@@ -26,7 +30,7 @@ states:
 
   - id: understand
     description: "Survey the codebase and relevant context before writing code"
-    transitions: [implement]
+    transitions: [implement, abandoned]
     on_enter:
       validate:
         # Progressive disclosure: surface just enough context to plan the work
@@ -35,8 +39,8 @@ states:
           message: "Available work items"
           severity: info
 
-        - command: "uv run --package turnstile-core pytest packages/turnstile-core/tests/ -q --no-header 2>&1 | tail -1"
-          expect: contains("passed")
+        - command: "${test_command} -q --no-header 2>&1 | tail -1 || echo 'no test output'"
+          expect: not_empty
           message: "Current test suite status (baseline before changes)"
           severity: info
 
@@ -47,13 +51,7 @@ states:
 
   - id: implement
     description: "Write the feature code"
-    transitions: [test, understand]
-    on_enter:
-      validate:
-        - command: "uv run --package turnstile-cli turnstile status 2>&1"
-          expect: not_empty
-          message: "Active process instances (current context)"
-          severity: info
+    transitions: [test, understand, abandoned]
 
   - id: test
     description: "Run the test suite and verify the changes"
@@ -69,12 +67,12 @@ states:
     on_exit:
       validate:
         # Hard gate: tests must pass
-        - command: "uv run --package turnstile-core pytest packages/turnstile-core/tests/ -q --no-header 2>&1 | tail -1"
+        - command: "${test_command} -q --no-header 2>&1 | tail -1"
           expect: contains("passed")
-          message: "Core test suite must pass"
+          message: "Test suite must pass"
 
         # Check no test regressions
-        - command: "uv run --package turnstile-core pytest packages/turnstile-core/tests/ -q --no-header 2>&1 | tail -1 | grep -oP '\\d+(?= passed)'"
+        - command: "${test_command} -q --no-header 2>&1 | tail -1 | grep -oP '\\d+(?= passed)'"
           expect: not_empty
           message: "Test count (verify no regressions)"
           severity: info
@@ -97,3 +95,7 @@ states:
 
   - id: done
     type: terminal
+
+  - id: abandoned
+    type: terminal
+    description: "Feature abandoned (not worth pursuing, or superseded)"
