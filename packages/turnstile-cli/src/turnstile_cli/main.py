@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 import click
@@ -141,6 +142,74 @@ def status(ctx: click.Context, show_all: bool) -> None:
             click.echo(
                 f"    Next: {', '.join(inst['available_transitions'])}"
             )
+
+
+def _format_age(iso_timestamp: str) -> str:
+    """Format an ISO timestamp as a human-readable age string."""
+    try:
+        ts = datetime.fromisoformat(iso_timestamp)
+        now = datetime.now(timezone.utc)
+        delta = now - ts
+        hours = delta.total_seconds() / 3600
+        if hours < 1:
+            minutes = int(delta.total_seconds() / 60)
+            return f"{minutes}m ago"
+        elif hours < 24:
+            return f"{int(hours)}h ago"
+        else:
+            days = int(hours / 24)
+            return f"{days}d ago"
+    except (ValueError, TypeError):
+        return "unknown"
+
+
+@cli.command()
+@click.pass_context
+def active(ctx: click.Context) -> None:
+    """Show active processes with age (for session-start hooks).
+
+    Designed for wiring into Claude Code SessionStart hooks. Shows
+    a compact summary of active instances with staleness indicators.
+
+    \b
+    Example hook in .claude/settings.json:
+      "hooks": {
+        "SessionStart": [{
+          "type": "command",
+          "command": "turnstile active"
+        }]
+      }
+    """
+    engine = _get_engine(ctx.obj["project"])
+    instances = engine.status()
+    if not instances:
+        return  # Silent when no active processes (clean session start)
+
+    click.echo(f"Active processes ({len(instances)}):")
+    for inst in instances:
+        age = _format_age(inst["updated_at"])
+        line = (
+            f"  [{inst['instance_id']}] {inst['process_name']} "
+            f"@ {inst['current_state']} (updated {age})"
+        )
+        # Staleness warning
+        try:
+            updated = datetime.fromisoformat(inst["updated_at"])
+            hours = (datetime.now(timezone.utc) - updated).total_seconds() / 3600
+            if hours > 24:
+                line += " ⚠ stale"
+        except (ValueError, TypeError):
+            pass
+
+        if inst.get("suspended"):
+            line += f" [suspended, child: {inst.get('child_instance_id', '?')}]"
+
+        click.echo(line)
+
+        # Show available transitions
+        transitions = inst.get("available_transitions", [])
+        if transitions:
+            click.echo(f"    next: {', '.join(transitions)}")
 
 
 @cli.command()

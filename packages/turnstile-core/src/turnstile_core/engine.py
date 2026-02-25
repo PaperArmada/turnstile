@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -61,6 +62,51 @@ class TransitionResult:
     parent_available_transitions: list[str] = field(default_factory=list)
     # Skill directives for the target state
     skill_directives: list[dict[str, str]] = field(default_factory=list)
+    # Summary on terminal state completion
+    summary: dict[str, Any] | None = None
+
+
+def _compute_summary(instance: ProcessInstance) -> dict[str, Any]:
+    """Compute a summary of a completed process instance."""
+    states_visited = []
+    for h in instance.history:
+        if not states_visited or states_visited[-1] != h.from_state:
+            states_visited.append(h.from_state)
+        states_visited.append(h.to_state)
+
+    # Deduplicate while preserving order for the unique set
+    unique_states = list(dict.fromkeys(states_visited))
+
+    # Count validations
+    total_validations = 0
+    passed_validations = 0
+    failed_validations = 0
+    for h in instance.history:
+        for v in h.validations:
+            total_validations += 1
+            if v.get("passed"):
+                passed_validations += 1
+            else:
+                failed_validations += 1
+
+    # Elapsed time
+    try:
+        started = datetime.fromisoformat(instance.started_at)
+        ended = datetime.fromisoformat(instance.updated_at)
+        elapsed = ended - started
+        elapsed_str = str(elapsed).split(".")[0]  # drop microseconds
+    except (ValueError, TypeError):
+        elapsed_str = "unknown"
+
+    return {
+        "states_visited": unique_states,
+        "transition_count": len(instance.history),
+        "override_count": len(instance.overrides),
+        "validations_run": total_validations,
+        "validations_passed": passed_validations,
+        "validations_failed": failed_validations,
+        "elapsed": elapsed_str,
+    }
 
 
 def _vr_to_dict(vr: ValidationResult) -> dict[str, Any]:
@@ -368,6 +414,9 @@ class Engine:
                 for sd in target.skill_directives
             ],
         )
+
+        if target.type == StateType.terminal:
+            result.summary = _compute_summary(instance)
 
         if parent_info:
             result.parent_resumed = True
