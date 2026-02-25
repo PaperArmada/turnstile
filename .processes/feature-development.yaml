@@ -39,6 +39,11 @@ states:
           message: "Available work items"
           severity: info
 
+        - command: "test '${issue_id}' != 'none' && echo 'linked to ${issue_id}' || (command -v bd >/dev/null 2>&1 && echo 'no issue linked (bd is available, consider passing issue_id)' || echo 'no issue tracker')"
+          expect: not_empty
+          message: "Issue linkage check"
+          severity: info
+
         - command: "${test_command} -q --no-header 2>&1 | tail -1 || echo 'no test output'"
           expect: not_empty
           message: "Current test suite status (baseline before changes)"
