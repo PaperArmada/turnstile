@@ -59,6 +59,8 @@ class TransitionResult:
     parent_resumed: bool = False
     parent_instance_id: str | None = None
     parent_available_transitions: list[str] = field(default_factory=list)
+    # Skill directives for the target state
+    skill_directives: list[dict[str, str]] = field(default_factory=list)
 
 
 def _vr_to_dict(vr: ValidationResult) -> dict[str, Any]:
@@ -236,7 +238,7 @@ class Engine:
         # For subprocess states, check routing targets instead of transitions
         if current.type == StateType.subprocess and current.subprocess_routing:
             all_targets = (
-                current.subprocess_routing.on_complete
+                current.subprocess_routing.on_complete_targets()
                 + current.subprocess_routing.on_fail
             )
             if target_state not in all_targets:
@@ -338,7 +340,9 @@ class Engine:
         if target.type == StateType.terminal:
             self._store.complete(instance)
             # Check if this child completing should resume a parent
-            parent_info = self._resume_parent(instance, "completed")
+            parent_info = self._resume_parent(
+                instance, "completed", child_terminal_state=target_state
+            )
             # Fire on_complete notification
             await self._notify("on_complete", {
                 "name": instance.process_name,
@@ -359,6 +363,10 @@ class Engine:
             new_state=target_state,
             validation_results=[_vr_to_dict(r) for r in all_results],
             available_transitions=target.transitions,
+            skill_directives=[
+                {"skill": sd.skill, "args": sd.args}
+                for sd in target.skill_directives
+            ],
         )
 
         if parent_info:
@@ -422,11 +430,16 @@ class Engine:
         }
 
     def _resume_parent(
-        self, child: ProcessInstance, outcome: str
+        self,
+        child: ProcessInstance,
+        outcome: str,
+        child_terminal_state: str | None = None,
     ) -> dict[str, Any] | None:
         """Resume a parent after subprocess completion or abandonment.
 
         Returns parent info dict if a parent was resumed, None otherwise.
+        child_terminal_state is the terminal state the child ended in
+        (used for dict-based on_complete routing).
         """
         if not child.parent_instance_id:
             return None
@@ -446,8 +459,10 @@ class Engine:
             return None
 
         routing = subprocess_state.subprocess_routing
-        if outcome == "completed":
-            available = routing.on_complete
+        if outcome == "completed" and child_terminal_state:
+            available = routing.resolve_on_complete(child_terminal_state)
+        elif outcome == "completed":
+            available = routing.on_complete_targets()
         else:
             available = routing.on_fail
 

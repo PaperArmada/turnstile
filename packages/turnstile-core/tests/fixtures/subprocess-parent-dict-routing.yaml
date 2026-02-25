@@ -1,0 +1,44 @@
+name: deploy-pipeline-v2
+description: "Deployment with terminal-state-aware routing"
+version: "2.0.0"
+
+parameters:
+  - name: deploy_target
+    description: "Deployment target environment"
+    required: true
+
+states:
+  - id: start
+    type: initial
+    transitions: [build]
+
+  - id: build
+    description: "Build artifacts"
+    transitions: [test]
+
+  - id: test
+    type: subprocess
+    description: "Run integration tests via subprocess"
+    process: integration-tests
+    parameter_map:
+      target_env: "${deploy_target}"
+    subprocess_routing:
+      on_complete:
+        done: deploy
+        failed: fix_and_retry
+      on_fail: [rollback]
+
+  - id: deploy
+    description: "Deploy to production"
+    transitions: [done]
+
+  - id: fix_and_retry
+    description: "Fix issues and retry"
+    transitions: [build]
+
+  - id: rollback
+    description: "Rollback on test abandonment"
+    transitions: [done]
+
+  - id: done
+    type: terminal

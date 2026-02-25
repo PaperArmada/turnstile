@@ -1,0 +1,33 @@
+name: feature-with-skills
+description: "Feature workflow with skill directives"
+version: "1.0.0"
+
+parameters:
+  - name: feature_name
+    description: "Feature being built"
+    required: true
+
+states:
+  - id: start
+    type: initial
+    transitions: [implement]
+
+  - id: implement
+    description: "Implement the feature"
+    transitions: [commit]
+
+  - id: commit
+    description: "Commit the implementation"
+    skill_directives:
+      - skill: "commit"
+    transitions: [review]
+
+  - id: review
+    description: "Review the changes"
+    skill_directives:
+      - skill: "review-pr"
+        args: "--thorough"
+    transitions: [done]
+
+  - id: done
+    type: terminal
