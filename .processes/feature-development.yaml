@@ -1,6 +1,6 @@
 name: feature-development
 description: "Standard feature development workflow"
-version: "1.1.0"
+version: "1.2.0"
 
 metadata:
   author: "matt"
@@ -34,7 +34,7 @@ states:
     on_enter:
       validate:
         # Progressive disclosure: surface just enough context to plan the work
-        - command: "bd ready 2>/dev/null | head -10 || echo 'no bd issues'"
+        - command: "command -v bd >/dev/null 2>&1 && bd ready 2>/dev/null | head -10 || echo 'no issue tracker configured'"
           expect: not_empty
           message: "Available work items"
           severity: info

@@ -34,3 +34,6 @@ htmlcov/
 
 # beads
 .beads/*.db
+
+# Claude Code local settings (contains secrets)
+.claude/settings.local.json
