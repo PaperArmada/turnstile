@@ -8,7 +8,7 @@ This project uses its own process engine. Enforcement is set to **monitor** mode
 
 | Task | Process | Example |
 |------|---------|---------|
-| New feature or improvement | `feature-development` | `process_start("feature-development", {"feature_name": "enforcement"})` |
+| New feature or improvement | `feature-development` | `process_start("feature-development", {"feature_name": "enforcement", "test_command": "uv run --package turnstile-core pytest packages/turnstile-core/tests/"})` |
 | Creating a new process definition | `create-process` | `process_start("create-process", {"name": "my-process", "purpose": "..."})` |
 | Updating the README | `readme-update` | `process_start("readme-update", {"reason": "new CLI commands"})` |
 
