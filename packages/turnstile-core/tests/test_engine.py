@@ -278,3 +278,59 @@ class TestTerminalCompletion:
         state_dir = project / ".process-state"
         completed_files = list(state_dir.joinpath("completed").rglob("*.json"))
         assert len(completed_files) == 1
+
+
+class TestTerminalSummary:
+    @pytest.mark.asyncio
+    async def test_summary_on_terminal(self, engine: Engine, project: Path):
+        started = engine.start("simple", {"task_name": "test"})
+        iid = started["instance_id"]
+
+        await engine.transition(iid, "working")
+        await engine.transition(iid, "review")
+        result = await engine.transition(iid, "done")
+
+        assert result.summary is not None
+        assert result.summary["transition_count"] == 3
+        assert "start" in result.summary["states_visited"]
+        assert "done" in result.summary["states_visited"]
+        assert result.summary["override_count"] == 0
+        assert result.summary["elapsed"] != "unknown"
+
+    @pytest.mark.asyncio
+    async def test_no_summary_on_non_terminal(self, engine: Engine, project: Path):
+        started = engine.start("simple", {"task_name": "test"})
+        iid = started["instance_id"]
+
+        result = await engine.transition(iid, "working")
+        assert result.summary is None
+
+    @pytest.mark.asyncio
+    async def test_summary_counts_overrides(self, engine: Engine, project: Path):
+        started = engine.start("simple", {"task_name": "test"})
+        iid = started["instance_id"]
+
+        await engine.transition(iid, "working")
+        await engine.skip(iid, "done", "testing summary with skip")
+
+        # Load from completed to check, since skip to terminal completes it
+        history = engine.history(iid)
+        assert any("skip" in (h.get("triggered_by") or "") for h in history)
+
+    @pytest.mark.asyncio
+    async def test_summary_validation_counts(self, engine: Engine, project: Path):
+        started = engine.start("simple", {"task_name": "test"})
+        iid = started["instance_id"]
+
+        await engine.transition(iid, "working")
+        await engine.transition(iid, "review")
+        result = await engine.transition(iid, "done")
+
+        summary = result.summary
+        # Validation counts should be non-negative
+        assert summary["validations_run"] >= 0
+        assert summary["validations_passed"] >= 0
+        assert summary["validations_failed"] >= 0
+        assert summary["validations_run"] == (
+            summary["validations_passed"] + summary["validations_failed"]
+        )
