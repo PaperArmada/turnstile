@@ -1,0 +1,45 @@
+name: release-with-skills
+description: "Demo: nested subprocess with dict routing and skill directives"
+version: "1.0.0"
+
+parameters:
+  - name: version
+    description: "Release version"
+    required: true
+
+states:
+  - id: start
+    type: initial
+    transitions: [implement]
+
+  - id: implement
+    description: "Implement the feature"
+    transitions: [validate]
+
+  - id: validate
+    type: subprocess
+    description: "Run validation suite (routes based on child outcome)"
+    process: integration-tests
+    parameter_map:
+      target_env: "ci-${version}"
+    subprocess_routing:
+      on_complete:
+        done: commit
+        failed: implement
+      on_fail: [implement]
+
+  - id: commit
+    description: "Commit the implementation"
+    skill_directives:
+      - skill: "commit"
+    transitions: [review]
+
+  - id: review
+    description: "Review the changes"
+    skill_directives:
+      - skill: "review-pr"
+        args: "--thorough"
+    transitions: [done, implement]
+
+  - id: done
+    type: terminal

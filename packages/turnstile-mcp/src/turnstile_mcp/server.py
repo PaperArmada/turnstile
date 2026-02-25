@@ -104,13 +104,22 @@ async def process_transition(
     """
     engine = _get_engine()
     result = await engine.transition(instance_id, target_state)
-    return {
+    response: dict[str, Any] = {
         "success": result.success,
         "new_state": result.new_state,
         "validation_results": result.validation_results,
         "available_transitions": result.available_transitions,
         "message": result.message,
     }
+    if result.subprocess_started:
+        response["subprocess_started"] = result.subprocess_started
+    if result.parent_resumed:
+        response["parent_resumed"] = True
+        response["parent_instance_id"] = result.parent_instance_id
+        response["parent_available_transitions"] = result.parent_available_transitions
+    if result.skill_directives:
+        response["skill_directives"] = result.skill_directives
+    return response
 
 
 @mcp.tool()

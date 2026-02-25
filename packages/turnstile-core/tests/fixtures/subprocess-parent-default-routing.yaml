@@ -1,0 +1,44 @@
+name: deploy-pipeline-v3
+description: "Deployment with _default fallback routing"
+version: "3.0.0"
+
+parameters:
+  - name: deploy_target
+    description: "Deployment target environment"
+    required: true
+
+states:
+  - id: start
+    type: initial
+    transitions: [build]
+
+  - id: build
+    description: "Build artifacts"
+    transitions: [test]
+
+  - id: test
+    type: subprocess
+    description: "Run integration tests via subprocess"
+    process: integration-tests
+    parameter_map:
+      target_env: "${deploy_target}"
+    subprocess_routing:
+      on_complete:
+        done: deploy
+        _default: review
+      on_fail: [rollback]
+
+  - id: deploy
+    description: "Deploy to production"
+    transitions: [done]
+
+  - id: review
+    description: "Review unexpected outcome"
+    transitions: [done]
+
+  - id: rollback
+    description: "Rollback on test abandonment"
+    transitions: [done]
+
+  - id: done
+    type: terminal

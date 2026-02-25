@@ -136,10 +136,45 @@ class StateHooks(BaseModel):
 
 
 class SubprocessRouting(BaseModel):
-    """Routing targets for subprocess state completion/failure."""
+    """Routing targets for subprocess state completion/failure.
 
-    on_complete: list[str] = Field(default_factory=list)
+    on_complete can be:
+      - list[str]: available transitions when child reaches any terminal state
+      - dict[str, str]: maps child terminal state name to parent target state.
+        A '_default' key provides fallback; if missing and child state not in
+        dict, all dict values become available transitions.
+    """
+
+    on_complete: list[str] | dict[str, str] = Field(default_factory=list)
     on_fail: list[str] = Field(default_factory=list)
+
+    def on_complete_targets(self) -> list[str]:
+        """Return all possible on_complete target state names."""
+        if isinstance(self.on_complete, dict):
+            return list(set(self.on_complete.values()))
+        return self.on_complete
+
+    def resolve_on_complete(self, child_terminal_state: str) -> list[str]:
+        """Resolve available transitions given the child's terminal state.
+
+        For list form, returns the list as-is.
+        For dict form, looks up the child state, falls back to _default,
+        then falls back to all values.
+        """
+        if isinstance(self.on_complete, dict):
+            if child_terminal_state in self.on_complete:
+                return [self.on_complete[child_terminal_state]]
+            if "_default" in self.on_complete:
+                return [self.on_complete["_default"]]
+            return list(set(self.on_complete.values()))
+        return self.on_complete
+
+
+class SkillDirective(BaseModel):
+    """A Claude Code skill to invoke when entering a state."""
+
+    skill: str
+    args: str = ""
 
 
 class ProcessState(BaseModel):
@@ -152,6 +187,7 @@ class ProcessState(BaseModel):
     on_enter: StateHooks | None = None
     on_exit: StateHooks | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    skill_directives: list[SkillDirective] = Field(default_factory=list)
 
     # Subprocess-specific fields
     process: str | None = None
@@ -250,7 +286,7 @@ class ProcessDefinition(BaseModel):
         # Subprocess routing targets must reference existing states
         for state in self.states:
             if state.subprocess_routing:
-                for target in state.subprocess_routing.on_complete:
+                for target in state.subprocess_routing.on_complete_targets():
                     if target not in state_ids:
                         raise ValueError(
                             f"Subprocess state '{state.id}' on_complete "

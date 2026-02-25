@@ -1,0 +1,41 @@
+name: release-pipeline
+description: "Top-level release with nested deploy subprocess"
+version: "1.0.0"
+
+parameters:
+  - name: release_version
+    description: "Version being released"
+    required: true
+
+states:
+  - id: start
+    type: initial
+    transitions: [prepare]
+
+  - id: prepare
+    description: "Prepare release artifacts"
+    transitions: [deploy_stage]
+
+  - id: deploy_stage
+    type: subprocess
+    description: "Deploy to staging via nested subprocess"
+    process: deploy-pipeline
+    parameter_map:
+      deploy_target: "staging-${release_version}"
+    subprocess_routing:
+      on_complete: [verify]
+      on_fail: [abort]
+
+  - id: verify
+    description: "Verify staging deployment"
+    transitions: [done]
+
+  - id: abort
+    description: "Abort release"
+    transitions: [aborted]
+
+  - id: done
+    type: terminal
+
+  - id: aborted
+    type: terminal
