@@ -662,6 +662,10 @@ def init_package(name: str, processes: tuple[str, ...], output: str | None) -> N
     type=click.Choice(["monitor", "enforce", "off"]),
     help="Enforcement mode (default: monitor).",
 )
+@click.option(
+    "--connect-only", is_flag=True, default=False,
+    help="Only set up MCP and hooks; skip .processes/, principles, and registry.",
+)
 @click.pass_context
 def init(
     ctx: click.Context,
@@ -669,11 +673,16 @@ def init(
     turnstile_dir: str | None,
     repo: str | None,
     enforce_mode: str,
+    connect_only: bool,
 ) -> None:
     """Initialize turnstile in a project directory.
 
     Sets up .mcp.json, .processes/, registry.yaml, and enforcement hooks.
     Safe to run in an existing project; will not overwrite existing files.
+
+    Use --connect-only when cloning a repo that already has process
+    definitions committed. This creates only the local wiring (.mcp.json,
+    .claude/settings.json) without touching .processes/ or registry.yaml.
 
     By default, uses uvx to run turnstile directly from GitHub (no local
     clone needed). Use --dev for local development with live code changes.
@@ -681,6 +690,7 @@ def init(
     \b
     Examples:
       turnstile init
+      turnstile init --connect-only
       turnstile init --dev
       turnstile init --enforce off
       turnstile init --repo https://github.com/myorg/turnstile.git
@@ -692,30 +702,48 @@ def init(
         turnstile_dir = _find_turnstile_root()
 
     created: list[str] = []
-
-    # .processes/ directory
     proc_dir = root / ".processes"
-    if not proc_dir.exists():
-        proc_dir.mkdir(parents=True)
-        created.append(".processes/")
 
-    # Design principles
-    principles_dir = proc_dir / "principles"
-    if not principles_dir.exists():
-        principles_dir.mkdir(parents=True)
-        written = 0
-        for name, content in PRINCIPLES.items():
-            (principles_dir / f"{name}.md").write_text(content)
-            written += 1
-        created.append(f".processes/principles/ ({written} files)")
+    if not connect_only:
+        # .processes/ directory
+        if not proc_dir.exists():
+            proc_dir.mkdir(parents=True)
+            created.append(".processes/")
 
-    # registry.yaml
-    registry_path = proc_dir / "registry.yaml"
-    if not registry_path.exists():
-        registry_path.write_text(
-            f'version: "1.0"\n\nsettings:\n  enforcement: {enforce_mode}\n'
-        )
-        created.append(".processes/registry.yaml")
+        # Design principles
+        principles_dir = proc_dir / "principles"
+        if not principles_dir.exists():
+            principles_dir.mkdir(parents=True)
+            written = 0
+            for name, content in PRINCIPLES.items():
+                (principles_dir / f"{name}.md").write_text(content)
+                written += 1
+            created.append(f".processes/principles/ ({written} files)")
+
+        # registry.yaml
+        registry_path = proc_dir / "registry.yaml"
+        if not registry_path.exists():
+            registry_path.write_text(
+                f'version: "1.0"\n\nsettings:\n  enforcement: {enforce_mode}\n'
+            )
+            created.append(".processes/registry.yaml")
+    else:
+        # Validate that definitions exist when connecting
+        if not proc_dir.exists():
+            click.echo(
+                "Warning: .processes/ not found. "
+                "Use 'turnstile init' (without --connect-only) for new projects.",
+                err=True,
+            )
+        registry_path = proc_dir / "registry.yaml"
+        if registry_path.exists():
+            click.echo(f"  Found {registry_path.relative_to(root)}")
+        else:
+            click.echo(
+                "Warning: .processes/registry.yaml not found. "
+                "Enforcement may not work without it.",
+                err=True,
+            )
 
     # .mcp.json
     mcp_path = root / ".mcp.json"
