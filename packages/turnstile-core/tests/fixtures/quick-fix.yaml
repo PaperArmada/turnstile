@@ -1,0 +1,24 @@
+name: quick-fix
+version: "1.0.0"
+description: "Lightweight process for small, self-contained changes"
+
+parameters:
+  - name: description
+    description: "Brief description of the change"
+    required: true
+
+states:
+  - id: start
+    type: initial
+    description: "Make the change"
+    permissions:
+      edit: true
+    transitions: [done, abandoned]
+
+  - id: done
+    type: terminal
+    description: "Change complete"
+
+  - id: abandoned
+    type: terminal
+    description: "Change abandoned"

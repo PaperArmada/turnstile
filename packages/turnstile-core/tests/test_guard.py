@@ -306,6 +306,111 @@ class TestStatePermissions:
         assert "editable" in result.reason
 
 
+class TestSmartSuggestions:
+    """Test that enforcement guidance lists available processes."""
+
+    def test_no_active_lists_processes(self, tmp_path):
+        """When no process is active, guidance should list available processes."""
+        _setup_project(tmp_path, enforcement="monitor")
+        result = check_enforcement(tmp_path)
+        assert result.decision == "warn"
+        assert "Available processes:" in result.guidance
+        assert "simple" in result.guidance
+
+    def test_no_active_enforce_lists_processes(self, tmp_path):
+        """Enforce mode denial should also list available processes."""
+        _setup_project(tmp_path, enforcement="enforce")
+        result = check_enforcement(tmp_path)
+        assert result.decision == "deny"
+        assert "Available processes:" in result.guidance
+        assert "simple" in result.guidance
+
+    def test_suggestions_include_required_params(self, tmp_path):
+        """Suggestions should show required parameter names."""
+        _setup_project(tmp_path, enforcement="monitor")
+        result = check_enforcement(tmp_path)
+        assert "requires:" in result.guidance
+        assert "task_name" in result.guidance
+
+    def test_multiple_processes_listed(self, tmp_path):
+        """All available processes should be listed."""
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir(exist_ok=True)
+        shutil.copy(FIXTURES / "simple.yaml", proc_dir / "simple.yaml")
+        shutil.copy(FIXTURES / "quick-fix.yaml", proc_dir / "quick-fix.yaml")
+
+        registry = {
+            "version": "1.0",
+            "settings": {"enforcement": "monitor"},
+        }
+        (proc_dir / "registry.yaml").write_text(
+            yaml.dump(registry, default_flow_style=False)
+        )
+
+        result = check_enforcement(tmp_path)
+        assert "simple" in result.guidance
+        assert "quick-fix" in result.guidance
+
+    def test_file_path_passed_through(self, tmp_path):
+        """file_path parameter should be accepted without error."""
+        _setup_project(tmp_path, enforcement="monitor")
+        result = check_enforcement(
+            tmp_path, action="edit", file_path="/some/file.py"
+        )
+        assert result.decision == "warn"
+        assert "Available processes:" in result.guidance
+
+
+class TestQuickFixProcess:
+    """Test the quick-fix process definition works end-to-end."""
+
+    @pytest.fixture()
+    def engine(self, tmp_path):
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir()
+        shutil.copy(FIXTURES / "quick-fix.yaml", proc_dir / "quick-fix.yaml")
+        return Engine(tmp_path)
+
+    def test_start_and_complete(self, engine):
+        started = engine.start("quick-fix", {"description": "fix typo"})
+        assert started["current_state"] == "start"
+        assert "done" in started["available_transitions"]
+        assert "abandoned" in started["available_transitions"]
+
+    @pytest.mark.asyncio
+    async def test_start_to_done(self, engine):
+        started = engine.start("quick-fix", {"description": "fix typo"})
+        result = await engine.transition(started["instance_id"], "done")
+        assert result.success is True
+        assert result.new_state == "done"
+        assert result.available_transitions == []
+
+    def test_start_to_abandoned(self, engine):
+        started = engine.start("quick-fix", {"description": "not needed"})
+        result = engine.abandon(started["instance_id"], "changed mind")
+        assert result["success"] is True
+
+    def test_edit_allowed_in_start(self, tmp_path):
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir(exist_ok=True)
+        shutil.copy(FIXTURES / "quick-fix.yaml", proc_dir / "quick-fix.yaml")
+
+        registry = {
+            "version": "1.0",
+            "settings": {"enforcement": "enforce"},
+        }
+        (proc_dir / "registry.yaml").write_text(
+            yaml.dump(registry, default_flow_style=False)
+        )
+
+        engine = Engine(tmp_path)
+        engine.start("quick-fix", {"description": "test"})
+
+        result = check_enforcement(tmp_path, action="edit")
+        assert result.decision == "allow"
+        assert "quick-fix" in result.reason
+
+
 class TestGenerateHookConfig:
     def test_generates_dev_config(self):
         config = generate_hook_config(turnstile_dir="/path/to/turnstile")

@@ -95,8 +95,14 @@ def run_guard() -> None:
         if not cwd:
             return
 
+        # Extract file path from tool input for contextual suggestions
+        tool_input = hook_input.get("tool_input", {})
+        file_path = tool_input.get("file_path", "")
+
         project_root = Path(cwd)
-        result = check_enforcement(project_root, action="edit")
+        result = check_enforcement(
+            project_root, action="edit", file_path=file_path
+        )
         response = _to_hook_response(result, project_root)
 
         if response is not None:
