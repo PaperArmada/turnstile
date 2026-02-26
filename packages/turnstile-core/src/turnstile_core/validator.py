@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import time
 from dataclasses import dataclass, field
@@ -77,6 +78,15 @@ def build_checker(expr: str) -> Callable[[str, int], bool]:
     if t == "exit_code":
         val = parsed["value"]
         return lambda _out, ec: ec == val
+    if t == "is_json":
+        return lambda out, _ec: _is_valid_json(out)
+    if t == "is_json_object":
+        return lambda out, _ec: _is_json_type(out, dict)
+    if t == "is_json_array":
+        return lambda out, _ec: _is_json_type(out, list)
+    if t == "matches_regex":
+        pattern = re.compile(parsed["value"])
+        return lambda out, _ec: pattern.fullmatch(out) is not None
 
     raise ValueError(f"Unknown expression type: {t}")
 
@@ -87,6 +97,24 @@ def _try_int(s: str) -> int | None:
         return int(s.strip())
     except (ValueError, TypeError):
         return None
+
+
+def _is_valid_json(s: str) -> bool:
+    """Check if a string is valid JSON."""
+    try:
+        json.loads(s)
+        return True
+    except (json.JSONDecodeError, ValueError):
+        return False
+
+
+def _is_json_type(s: str, expected_type: type) -> bool:
+    """Check if a string is valid JSON and the parsed value is the expected type."""
+    try:
+        parsed = json.loads(s)
+        return isinstance(parsed, expected_type)
+    except (json.JSONDecodeError, ValueError):
+        return False
 
 
 # ---------------------------------------------------------------------------
