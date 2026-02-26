@@ -100,9 +100,43 @@ def _format_guidance(contexts: list[EnforcementContext], action: str) -> str:
     return "\n".join(lines)
 
 
+def _suggest_processes(project_root: Path, file_path: str = "") -> str:
+    """Build a process suggestion list from available definitions.
+
+    Returns a formatted string listing available processes with descriptions,
+    suitable for inclusion in enforcement guidance.
+    """
+    try:
+        discovered = discover_definitions_full(project_root)
+    except Exception:
+        return "Use process_start() or check process_list() for options."
+
+    if not discovered:
+        return "No process definitions found. Run 'turnstile init' first."
+
+    lines = ["Available processes:"]
+    for name in sorted(discovered):
+        defn = discovered[name].definition
+        desc = defn.description or ""
+        params = [p.name for p in defn.parameters if p.required]
+        param_hint = ""
+        if params:
+            param_hint = f" (requires: {', '.join(params)})"
+        lines.append(f"  - {name}: {desc}{param_hint}")
+
+    lines.append("")
+    lines.append(
+        'Start one with process_start("<name>", {<parameters>}) '
+        "before editing files."
+    )
+
+    return "\n".join(lines)
+
+
 def check_enforcement(
     project_root: Path,
     action: str = "edit",
+    file_path: str = "",
 ) -> EnforcementResult:
     """Check whether an action is permitted given active process state.
 
@@ -112,6 +146,7 @@ def check_enforcement(
     Args:
         project_root: The project root directory.
         action: The action being attempted (currently: "edit").
+        file_path: The file being acted on (for contextual suggestions).
 
     Returns:
         EnforcementResult with decision, reason, context, and guidance.
@@ -129,10 +164,7 @@ def check_enforcement(
 
     if not active:
         reason = f"No active turnstile process ({mode} mode)"
-        guidance = (
-            f"Start a process before making changes. "
-            f"Use process_start() or check process_list() for options."
-        )
+        guidance = _suggest_processes(project_root, file_path)
         if mode == "monitor":
             return EnforcementResult(
                 decision="warn", reason=reason, guidance=guidance
