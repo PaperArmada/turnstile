@@ -1,6 +1,6 @@
 name: release
 description: "Prepare, validate, and ship a versioned release"
-version: "1.0.0"
+version: "1.1.0"
 
 metadata:
   author: "turnstile"
@@ -26,6 +26,8 @@ states:
 
   - id: prepare
     description: "Review what will be in this release"
+    permissions:
+      edit: false
     transitions: [validate]
     on_enter:
       validate:
@@ -46,6 +48,8 @@ states:
 
   - id: validate
     description: "Run the full test suite and any pre-release checks"
+    permissions:
+      edit: false
     transitions: [tag, prepare]
     on_exit:
       validate:

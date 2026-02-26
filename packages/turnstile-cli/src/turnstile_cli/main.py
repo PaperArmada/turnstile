@@ -13,7 +13,6 @@ from turnstile_core.admin import generate_mermaid, simulate_dry_run
 from turnstile_core.engine import Engine
 from turnstile_core.guard import (
     _find_turnstile_root,
-    check_enforcement,
     install_enforcement,
     run_guard,
     update_registry_enforcement,
@@ -723,7 +722,59 @@ def init(
             click.echo(
                 "\nRestart Claude Code to connect the MCP server."
             )
-    else:
+
+    # Emit CLAUDE.md guidance for the agent to integrate
+    claude_md = root / "CLAUDE.md"
+    marker = "## Process Enforcement"
+    already_has = claude_md.exists() and marker in claude_md.read_text()
+    if not already_has:
+        # Discover processes to build the guidance table
+        proc_dir = root / ".processes"
+        proc_table = ""
+        if proc_dir.exists():
+            from turnstile_core.loader import discover_definitions_full
+            discovered = discover_definitions_full(root)
+            if discovered:
+                rows = []
+                for name, disc in sorted(discovered.items()):
+                    defn = disc.definition
+                    params = ", ".join(
+                        f'"{p.name}": "..."'
+                        for p in defn.parameters
+                        if p.required
+                    )
+                    rows.append(
+                        f'| {defn.description or name} '
+                        f'| `process_start("{name}", {{{params}}})` |'
+                    )
+                proc_table = (
+                    "| Task | Command |\n"
+                    "|------|---------|"
+                )
+                for row in rows:
+                    proc_table += f"\n{row}"
+
+        guidance = f"""{marker}
+
+This project uses turnstile for process enforcement (currently **{enforce_mode}** mode).
+
+**Before editing any code, start the appropriate process:**
+
+{proc_table}
+
+Use `process_status()` to check active instances. Use `process_transition()` to advance through states. The enforcement guard will remind you of your current state on every file edit.
+
+States with `permissions.edit: false` restrict file edits until you transition to an implementation state. Follow the validation gates; they surface useful context."""
+
+        click.echo(f"\n--- CLAUDE.md guidance (add to {claude_md}) ---")
+        click.echo(guidance)
+        click.echo("--- end guidance ---")
+        click.echo(
+            "\nAdd the above block to your project's CLAUDE.md, "
+            "placing it where it fits best in the document structure."
+        )
+
+    if not created and already_has:
         click.echo("Everything already exists, nothing to do.")
 
 

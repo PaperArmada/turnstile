@@ -1,6 +1,6 @@
 name: code-review
 description: "Structured review of a changeset or pull request"
-version: "1.0.0"
+version: "1.1.0"
 
 metadata:
   author: "turnstile"
@@ -26,6 +26,8 @@ states:
 
   - id: survey
     description: "Understand the scope and context of the changes"
+    permissions:
+      edit: false
     transitions: [review]
     on_enter:
       validate:
@@ -46,10 +48,14 @@ states:
 
   - id: review
     description: "Read the code, check for issues, and note findings"
+    permissions:
+      edit: false
     transitions: [request_changes, approve, survey]
 
   - id: request_changes
     description: "Changes are needed before this can be merged"
+    permissions:
+      edit: false
     transitions: [review]
     on_enter:
       validate:
