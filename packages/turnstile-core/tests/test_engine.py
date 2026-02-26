@@ -281,6 +281,46 @@ class TestHistory:
         assert len(hist) == 3
         assert hist[-1]["to_state"] == "done"
 
+    @pytest.mark.asyncio
+    async def test_transition_metadata(self, engine: Engine):
+        """Metadata dict is stored in history and surfaced by history()."""
+        started = engine.start("simple", {"task_name": "test"})
+        iid = started["instance_id"]
+
+        await engine.transition(
+            iid, "working", metadata={"cluster_id": "valuation", "iteration": "1"}
+        )
+        await engine.transition(iid, "review")
+
+        hist = engine.history(iid)
+        assert hist[0]["metadata"] == {"cluster_id": "valuation", "iteration": "1"}
+        # Second transition has no metadata, should not appear in response
+        assert "metadata" not in hist[1]
+
+    @pytest.mark.asyncio
+    async def test_transition_metadata_none(self, engine: Engine):
+        """Omitting metadata produces an empty dict (backward compatible)."""
+        started = engine.start("simple", {"task_name": "test"})
+        iid = started["instance_id"]
+
+        await engine.transition(iid, "working")
+
+        hist = engine.history(iid)
+        assert "metadata" not in hist[0]
+
+    @pytest.mark.asyncio
+    async def test_metadata_persists_through_completion(self, engine: Engine):
+        """Metadata survives archival to completed/."""
+        started = engine.start("simple", {"task_name": "test"})
+        iid = started["instance_id"]
+
+        await engine.transition(iid, "working", metadata={"reason": "hotfix"})
+        await engine.transition(iid, "review")
+        await engine.transition(iid, "done")
+
+        hist = engine.history(iid)
+        assert hist[0]["metadata"] == {"reason": "hotfix"}
+
 
 class TestValidateDefinition:
     def test_valid(self, engine: Engine):
