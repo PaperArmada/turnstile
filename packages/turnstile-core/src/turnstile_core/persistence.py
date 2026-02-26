@@ -26,6 +26,7 @@ class HistoryEntry(BaseModel):
     at: str
     triggered_by: str = ""
     validations: list[dict[str, Any]] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     model_config = {"populate_by_name": True}
 

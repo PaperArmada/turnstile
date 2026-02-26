@@ -105,7 +105,8 @@ async def process_status(
 
 @mcp.tool()
 async def process_transition(
-    instance_id: str, target_state: str
+    instance_id: str, target_state: str,
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Attempt to transition a process instance to a new state.
 
@@ -117,9 +118,12 @@ async def process_transition(
     Args:
         instance_id: The ID of the process instance.
         target_state: The state to transition to.
+        metadata: Optional structured context for this transition
+                  (e.g. {"cluster_id": "valuation", "iteration": "2"}).
+                  Stored in history for analytics and audit.
     """
     engine = _get_engine()
-    result = await engine.transition(instance_id, target_state)
+    result = await engine.transition(instance_id, target_state, metadata=metadata)
     response: dict[str, Any] = {
         "success": result.success,
         "new_state": result.new_state,

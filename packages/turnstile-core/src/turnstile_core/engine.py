@@ -306,7 +306,8 @@ class Engine:
         return result
 
     async def transition(
-        self, instance_id: str, target_state: str
+        self, instance_id: str, target_state: str,
+        metadata: dict[str, Any] | None = None,
     ) -> TransitionResult:
         """Attempt a legal transition to a new state."""
         instance = self._store.load(instance_id)
@@ -396,6 +397,7 @@ class Engine:
             "to": target_state,
             "at": _now_iso(),
             "validations": [_vr_to_dict(r) for r in all_results],
+            "metadata": metadata or {},
         })
         instance.current_state = target_state
         instance.history.append(history_entry)
@@ -727,16 +729,19 @@ class Engine:
         Searches active, completed, and abandoned instances.
         """
         instance = self._store.load_any(instance_id)
-        return [
-            {
+        result = []
+        for h in instance.history:
+            entry: dict[str, Any] = {
                 "from_state": h.from_state,
                 "to_state": h.to_state,
                 "timestamp": h.at,
                 "validations": h.validations,
                 "triggered_by": h.triggered_by,
             }
-            for h in instance.history
-        ]
+            if h.metadata:
+                entry["metadata"] = h.metadata
+            result.append(entry)
+        return result
 
     def graph(self, name: str) -> dict[str, Any]:
         """Generate a Mermaid state diagram for a process definition."""
