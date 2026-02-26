@@ -1,20 +1,20 @@
-version: "1.0"
-
+version: '1.0'
 local:
-  - feature-development
-  - create-process
-  - readme-update
-  - bug-fix
-  - code-review
-  - release
-  - spike
-  - heist
-
+- feature-development
+- create-process
+- readme-update
+- bug-fix
+- code-review
+- release
+- spike
+- heist
 settings:
   state_dir: .process-state
   require_override_reason: true
   log_retention_days: 90
   enforcement: monitor
   notifications:
-    on_complete: "echo '[COMPLETE] ${name} (${instance_id}) finished at ${state}' >> .process-state/log.txt"
-    on_override: "echo '[OVERRIDE] ${name} (${instance_id}): ${step} skipped by ${user} - ${reason}' >> .process-state/log.txt"
+    on_complete: echo '[COMPLETE] ${name} (${instance_id}) finished at ${state}' >>
+      .process-state/log.txt
+    on_override: 'echo ''[OVERRIDE] ${name} (${instance_id}): ${step} skipped by ${user}
+      - ${reason}'' >> .process-state/log.txt'

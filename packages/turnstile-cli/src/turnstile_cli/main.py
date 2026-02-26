@@ -123,6 +123,49 @@ def list_processes(ctx: click.Context) -> None:
 
 
 @cli.command()
+@click.argument("name")
+@click.pass_context
+def info(ctx: click.Context, name: str) -> None:
+    """Show detailed info about a process definition.
+
+    Displays parameters (required/optional, defaults), states with
+    descriptions and permissions, and metadata. Use this to discover
+    what parameters are needed before starting a process.
+    """
+    engine = _get_engine(ctx.obj["project"])
+    try:
+        result = engine.info(name)
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1)
+
+    click.echo(f"{result['name']} v{result['version']}")
+    if result.get("description"):
+        click.echo(f"  {result['description']}")
+
+    click.echo("\nParameters:")
+    for p in result["parameters"]:
+        req = "required" if p["required"] else "optional"
+        default = f", default: {p['default']}" if "default" in p else ""
+        click.echo(f"  {p['name']} ({req}{default})")
+        if p.get("description"):
+            click.echo(f"    {p['description']}")
+
+    click.echo("\nStates:")
+    for s in result["states"]:
+        parts = [f"  {s['id']}"]
+        if s["type"] != "normal":
+            parts.append(f"[{s['type']}]")
+        if s.get("permissions", {}).get("edit") is False:
+            parts.append("[read-only]")
+        click.echo(" ".join(parts))
+        if s.get("description"):
+            click.echo(f"    {s['description']}")
+        if s.get("transitions"):
+            click.echo(f"    -> {', '.join(s['transitions'])}")
+
+
+@cli.command()
 @click.option("--all", "-a", "show_all", is_flag=True, help="Show all details.")
 @click.pass_context
 def status(ctx: click.Context, show_all: bool) -> None:

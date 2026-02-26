@@ -42,6 +42,41 @@ class TestListProcesses:
         assert e.list_processes() == []
 
 
+class TestInfo:
+    def test_returns_parameters(self, engine: Engine):
+        result = engine.info("simple")
+        assert result["name"] == "simple"
+        assert result["version"] == "1.0.0"
+        assert len(result["parameters"]) >= 1
+        param = result["parameters"][0]
+        assert param["name"] == "task_name"
+        assert param["required"] is True
+
+    def test_returns_states(self, engine: Engine):
+        result = engine.info("simple")
+        states = result["states"]
+        state_ids = [s["id"] for s in states]
+        assert "start" in state_ids
+        assert "working" in state_ids
+        assert "done" in state_ids
+
+    def test_state_types(self, engine: Engine):
+        result = engine.info("simple")
+        states = {s["id"]: s for s in result["states"]}
+        assert states["start"]["type"] == "initial"
+        assert states["done"]["type"] == "terminal"
+        assert states["working"]["type"] == "normal"
+
+    def test_state_transitions(self, engine: Engine):
+        result = engine.info("simple")
+        states = {s["id"]: s for s in result["states"]}
+        assert "working" in states["start"]["transitions"]
+
+    def test_unknown_process(self, engine: Engine):
+        with pytest.raises(ProcessNotFoundError):
+            engine.info("nonexistent")
+
+
 class TestStart:
     def test_start_process(self, engine: Engine):
         result = engine.start("simple", {"task_name": "build feature"})
