@@ -59,6 +59,22 @@ async def process_list(reload: bool = False) -> dict[str, Any]:
 
 
 @mcp.tool()
+async def process_info(name: str) -> dict[str, Any]:
+    """Get detailed information about a process definition.
+
+    Shows parameters (with descriptions, defaults, and whether they're
+    required), states (with descriptions, permissions, and transitions),
+    and metadata. Use this to discover required parameters before calling
+    process_start.
+
+    Args:
+        name: The name of the process definition.
+    """
+    engine = _get_engine()
+    return engine.info(name)
+
+
+@mcp.tool()
 async def process_start(
     name: str, parameters: dict[str, str] | None = None
 ) -> dict[str, Any]:

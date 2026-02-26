@@ -174,6 +174,53 @@ class Engine:
             })
         return result
 
+    def info(self, name: str) -> dict[str, Any]:
+        """Get detailed information about a process definition.
+
+        Returns parameters (with descriptions/defaults), states (with
+        descriptions, permissions, transitions), and metadata. Designed
+        for parameter discovery before calling start().
+        """
+        defn, def_hash = self._get_definition(name)
+
+        parameters = []
+        for p in defn.parameters:
+            param_info: dict[str, Any] = {
+                "name": p.name,
+                "description": p.description,
+                "required": p.required,
+            }
+            if p.default is not None:
+                param_info["default"] = p.default
+            parameters.append(param_info)
+
+        states = []
+        for s in defn.states:
+            state_info: dict[str, Any] = {
+                "id": s.id,
+                "type": s.type.value,
+            }
+            if s.description:
+                state_info["description"] = s.description
+            if s.transitions:
+                state_info["transitions"] = s.transitions
+            if not s.permissions.edit:
+                state_info["permissions"] = {"edit": False}
+            states.append(state_info)
+
+        result: dict[str, Any] = {
+            "name": defn.name,
+            "description": defn.description,
+            "version": defn.version,
+            "parameters": parameters,
+            "states": states,
+        }
+
+        if defn.metadata:
+            result["metadata"] = defn.metadata
+
+        return result
+
     def start(
         self,
         name: str,
