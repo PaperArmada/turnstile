@@ -81,6 +81,47 @@ class TestBuildChecker:
         assert check("anything", 0) is True
         assert check("anything", 1) is False
 
+    def test_is_json(self):
+        check = build_checker("is_json")
+        assert check('{"key": "value"}', 0) is True
+        assert check("[1, 2, 3]", 0) is True
+        assert check('"just a string"', 0) is True
+        assert check("42", 0) is True
+        assert check("not json at all", 0) is False
+        assert check("", 0) is False
+        assert check("Authentication required", 0) is False
+
+    def test_is_json_object(self):
+        check = build_checker("is_json_object")
+        assert check('{"key": "value"}', 0) is True
+        assert check("{}", 0) is True
+        assert check("[1, 2]", 0) is False
+        assert check('"string"', 0) is False
+        assert check("not json", 0) is False
+
+    def test_is_json_array(self):
+        check = build_checker("is_json_array")
+        assert check("[1, 2, 3]", 0) is True
+        assert check("[]", 0) is True
+        assert check('{"key": "value"}', 0) is False
+        assert check("not json", 0) is False
+
+    def test_matches_regex(self):
+        check = build_checker('matches_regex("^\\d+$")')
+        assert check("42", 0) is True
+        assert check("abc", 0) is False
+        # fullmatch: partial matches fail (unlike matches which uses search)
+        assert check("abc 42 def", 0) is False
+
+    def test_matches_regex_vs_matches(self):
+        # matches (search) finds substring
+        search_check = build_checker('matches("\\d+")')
+        assert search_check("abc 42 def", 0) is True
+        # matches_regex (fullmatch) requires full string match
+        full_check = build_checker('matches_regex("\\d+")')
+        assert full_check("abc 42 def", 0) is False
+        assert full_check("42", 0) is True
+
 
 # ---------------------------------------------------------------------------
 # substitute_params

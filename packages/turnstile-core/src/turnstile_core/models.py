@@ -27,9 +27,9 @@ class StateType(str, Enum):
 # ---------------------------------------------------------------------------
 
 # Regex patterns for parsing expect expressions
-_BARE_KEYWORDS = {"empty", "not_empty"}
+_BARE_KEYWORDS = {"empty", "not_empty", "is_json", "is_json_object", "is_json_array"}
 _FUNC_PATTERN = re.compile(
-    r'^(equals|not_equals|contains|starts_with|ends_with|matches)\("(.*)"\)$'
+    r'^(equals|not_equals|contains|starts_with|ends_with|matches|matches_regex)\("(.*)"\)$'
 )
 _NUMERIC_PATTERN = re.compile(r"^(greater_than|less_than)\((\d+)\)$")
 _EXIT_CODE_PATTERN = re.compile(r"^exit_code\((\d+)\)$")
