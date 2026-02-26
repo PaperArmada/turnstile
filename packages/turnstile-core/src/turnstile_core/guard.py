@@ -1,9 +1,8 @@
-"""Enforcement guard for Claude Code PreToolUse hooks.
+"""Claude Code PreToolUse hook adapter for turnstile enforcement.
 
-When enforcement is enabled, this module checks whether an active turnstile
-process exists before allowing file mutations (Write, Edit). It reads the
-enforcement mode from registry.yaml and checks .process-state/active/ for
-running instances.
+This is the platform-specific adapter for Claude Code. It reads the CC
+hook JSON from stdin, delegates to the agent-agnostic enforcement module,
+and translates the result into CC hook response format.
 
 Invoked as a Claude Code PreToolUse hook via: turnstile guard
 """
@@ -15,8 +14,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from turnstile_core.enforcement import EnforcementResult, check_enforcement
 from turnstile_core.loader import load_registry
-from turnstile_core.persistence import StateStore
 
 
 def _find_turnstile_root() -> str:
@@ -34,72 +33,51 @@ def _find_turnstile_root() -> str:
     return str(Path.cwd())
 
 
-def check_enforcement(project_root: Path) -> dict[str, Any]:
-    """Check enforcement status and return a hook response.
+def _to_hook_response(result: EnforcementResult, project_root: Path) -> dict[str, Any] | None:
+    """Translate an EnforcementResult into a Claude Code hook response.
 
-    Returns a dict with:
-    - action: "allow" | "deny" | "warn"
-    - reason: human-readable explanation
-    - response: dict to output as JSON for Claude Code hooks, or None
+    Returns None if no hook output is needed (silent allow).
     """
-    registry = load_registry(project_root)
-    mode = registry.settings.enforcement
+    if result.decision == "allow" and not result.context:
+        # Enforcement off or error fallback: silent allow
+        return None
 
-    if mode == "off":
+    if result.decision == "allow" and result.context:
+        # Permitted, but surface state context as a nudge
+        lines = [f"Process: {result.reason}"]
+        if result.guidance:
+            lines.append(result.guidance)
         return {
-            "action": "allow",
-            "reason": "Enforcement is off",
-            "response": None,
-        }
-
-    # Check for active instances
-    state_dir = project_root / registry.settings.state_dir
-    store = StateStore(state_dir)
-    active = store.list_active()
-    has_active = len(active) > 0
-
-    if has_active:
-        process_names = ", ".join(sorted({i.process_name for i in active}))
-        return {
-            "action": "allow",
-            "reason": f"Active process(es): {process_names}",
-            "response": None,
-        }
-
-    # No active process
-    if mode == "monitor":
-        return {
-            "action": "warn",
-            "reason": "No active turnstile process (monitor mode)",
-            "response": {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "allow",
-                    "additionalContext": (
-                        f"WARNING: No active turnstile process "
-                        f"(checked {project_root}). "
-                        f"Start a process with process_start before "
-                        f"making changes."
-                    ),
-                }
-            },
-        }
-
-    # enforce mode
-    return {
-        "action": "deny",
-        "reason": "No active turnstile process (enforce mode)",
-        "response": {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
-                "permissionDecision": "deny",
-                "permissionDecisionReason": (
-                    f"Turnstile enforcement is ON. No active process "
-                    f"instance found in {project_root}. Start a process "
-                    f"with process_start before making file changes."
-                ),
+                "permissionDecision": "allow",
+                "additionalContext": "\n".join(lines),
             }
-        },
+        }
+
+    if result.decision == "warn":
+        # Monitor mode: allow but warn
+        lines = [f"WARNING: {result.reason}"]
+        if result.guidance:
+            lines.append(result.guidance)
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "allow",
+                "additionalContext": "\n".join(lines),
+            }
+        }
+
+    # Deny
+    lines = [result.reason]
+    if result.guidance:
+        lines.append(result.guidance)
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": "\n".join(lines),
+        }
     }
 
 
@@ -115,18 +93,23 @@ def run_guard() -> None:
         hook_input = json.loads(raw)
         cwd = hook_input.get("cwd", "")
         if not cwd:
-            # No cwd in input, allow
             return
 
         project_root = Path(cwd)
-        result = check_enforcement(project_root)
+        result = check_enforcement(project_root, action="edit")
+        response = _to_hook_response(result, project_root)
 
-        if result["response"] is not None:
-            print(json.dumps(result["response"]))
+        if response is not None:
+            print(json.dumps(response))
 
     except Exception:
         # Fail open: if anything goes wrong, allow the action
         pass
+
+
+# ---------------------------------------------------------------------------
+# Hook installation helpers (unchanged, platform-specific)
+# ---------------------------------------------------------------------------
 
 
 def _guard_command_uvx(repo_url: str) -> str:

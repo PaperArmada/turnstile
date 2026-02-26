@@ -1,4 +1,4 @@
-"""Tests for turnstile_core.guard."""
+"""Tests for turnstile_core.guard and turnstile_core.enforcement."""
 
 import json
 import shutil
@@ -8,8 +8,8 @@ import pytest
 import yaml
 
 from turnstile_core.engine import Engine
+from turnstile_core.enforcement import check_enforcement
 from turnstile_core.guard import (
-    check_enforcement,
     generate_hook_config,
     install_enforcement,
     update_registry_enforcement,
@@ -18,11 +18,11 @@ from turnstile_core.guard import (
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
-def _setup_project(tmp_path, enforcement="off"):
+def _setup_project(tmp_path, enforcement="off", fixture="simple.yaml"):
     """Set up a project with a process definition and registry."""
     proc_dir = tmp_path / ".processes"
-    proc_dir.mkdir()
-    shutil.copy(FIXTURES / "simple.yaml", proc_dir / "simple.yaml")
+    proc_dir.mkdir(exist_ok=True)
+    shutil.copy(FIXTURES / fixture, proc_dir / fixture)
 
     if enforcement != "off":
         registry = {
@@ -40,57 +40,50 @@ class TestCheckEnforcement:
     def test_off_mode_allows(self, tmp_path):
         _setup_project(tmp_path, enforcement="off")
         result = check_enforcement(tmp_path)
-        assert result["action"] == "allow"
-        assert result["response"] is None
+        assert result.decision == "allow"
+        assert result.context == []
 
     def test_enforce_no_active_denies(self, tmp_path):
         _setup_project(tmp_path, enforcement="enforce")
         result = check_enforcement(tmp_path)
-        assert result["action"] == "deny"
-        assert result["response"] is not None
-        hook_output = result["response"]["hookSpecificOutput"]
-        assert hook_output["permissionDecision"] == "deny"
-        assert "No active process" in hook_output["permissionDecisionReason"]
+        assert result.decision == "deny"
+        assert "No active" in result.reason
 
     def test_enforce_with_active_allows(self, tmp_path):
         engine = _setup_project(tmp_path, enforcement="enforce")
         engine.start("simple", {"task_name": "test"})
 
         result = check_enforcement(tmp_path)
-        assert result["action"] == "allow"
-        assert result["response"] is None
-        assert "simple" in result["reason"]
+        assert result.decision == "allow"
+        assert "simple" in result.reason
+        assert len(result.context) == 1
+        assert result.context[0].process_name == "simple"
 
     def test_monitor_no_active_warns(self, tmp_path):
         _setup_project(tmp_path, enforcement="monitor")
         result = check_enforcement(tmp_path)
-        assert result["action"] == "warn"
-        assert result["response"] is not None
-        hook_output = result["response"]["hookSpecificOutput"]
-        assert hook_output["permissionDecision"] == "allow"
-        assert "WARNING" in hook_output["additionalContext"]
+        assert result.decision == "warn"
+        assert "No active" in result.reason
 
     def test_monitor_with_active_allows(self, tmp_path):
         engine = _setup_project(tmp_path, enforcement="monitor")
         engine.start("simple", {"task_name": "test"})
 
         result = check_enforcement(tmp_path)
-        assert result["action"] == "allow"
-        assert result["response"] is None
+        assert result.decision == "allow"
+        assert len(result.context) == 1
 
     def test_no_processes_dir_defaults_off(self, tmp_path):
-        # No .processes directory at all
         result = check_enforcement(tmp_path)
-        assert result["action"] == "allow"
+        assert result.decision == "allow"
 
     def test_no_registry_defaults_off(self, tmp_path):
-        # .processes dir exists but no registry.yaml
         proc_dir = tmp_path / ".processes"
         proc_dir.mkdir()
         shutil.copy(FIXTURES / "simple.yaml", proc_dir / "simple.yaml")
 
         result = check_enforcement(tmp_path)
-        assert result["action"] == "allow"
+        assert result.decision == "allow"
 
     def test_multiple_active_processes(self, tmp_path):
         engine = _setup_project(tmp_path, enforcement="enforce")
@@ -98,8 +91,219 @@ class TestCheckEnforcement:
         engine.start("simple", {"task_name": "second"})
 
         result = check_enforcement(tmp_path)
-        assert result["action"] == "allow"
-        assert "simple" in result["reason"]
+        assert result.decision == "allow"
+        assert "simple" in result.reason
+        assert len(result.context) == 2
+
+    def test_state_context_includes_description(self, tmp_path):
+        engine = _setup_project(tmp_path, enforcement="monitor")
+        engine.start("simple", {"task_name": "test"})
+
+        result = check_enforcement(tmp_path)
+        assert result.decision == "allow"
+        ctx = result.context[0]
+        assert ctx.current_state == "start"
+        assert ctx.available_transitions == ["working"]
+
+    def test_guidance_includes_state_info(self, tmp_path):
+        engine = _setup_project(tmp_path, enforcement="monitor")
+        engine.start("simple", {"task_name": "test"})
+
+        result = check_enforcement(tmp_path)
+        assert "simple" in result.guidance
+        assert "start" in result.guidance
+
+
+class TestStatePermissions:
+    """Test enforcement with state-level edit permissions."""
+
+    def test_default_permissions_allow_edit(self, tmp_path):
+        """States without explicit permissions default to edit=True."""
+        engine = _setup_project(tmp_path, enforcement="enforce")
+        engine.start("simple", {"task_name": "test"})
+
+        result = check_enforcement(tmp_path, action="edit")
+        assert result.decision == "allow"
+
+    def test_edit_false_blocks_in_enforce(self, tmp_path):
+        """States with edit=false deny edits in enforce mode."""
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir(exist_ok=True)
+
+        # Create a definition with a no-edit state
+        defn = {
+            "name": "guarded",
+            "version": "1.0.0",
+            "parameters": [{"name": "task", "required": True}],
+            "states": [
+                {
+                    "id": "start",
+                    "type": "initial",
+                    "transitions": ["investigate"],
+                },
+                {
+                    "id": "investigate",
+                    "description": "Read-only investigation",
+                    "permissions": {"edit": False},
+                    "transitions": ["implement", "done"],
+                },
+                {
+                    "id": "implement",
+                    "description": "Write code",
+                    "transitions": ["done"],
+                },
+                {"id": "done", "type": "terminal"},
+            ],
+        }
+        (proc_dir / "guarded.yaml").write_text(
+            yaml.dump(defn, default_flow_style=False)
+        )
+
+        registry = {
+            "version": "1.0",
+            "settings": {"enforcement": "enforce"},
+        }
+        (proc_dir / "registry.yaml").write_text(
+            yaml.dump(registry, default_flow_style=False)
+        )
+
+        engine = Engine(tmp_path)
+        started = engine.start("guarded", {"task": "test"})
+        iid = started["instance_id"]
+
+        # In start state (default permissions), edit is allowed
+        result = check_enforcement(tmp_path, action="edit")
+        assert result.decision == "allow"
+
+    def test_edit_false_warns_in_monitor(self, tmp_path):
+        """States with edit=false warn (not deny) in monitor mode."""
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir(exist_ok=True)
+
+        defn = {
+            "name": "guarded",
+            "version": "1.0.0",
+            "parameters": [{"name": "task", "required": True}],
+            "states": [
+                {
+                    "id": "start",
+                    "type": "initial",
+                    "permissions": {"edit": False},
+                    "transitions": ["work"],
+                },
+                {"id": "work", "transitions": ["done"]},
+                {"id": "done", "type": "terminal"},
+            ],
+        }
+        (proc_dir / "guarded.yaml").write_text(
+            yaml.dump(defn, default_flow_style=False)
+        )
+
+        registry = {
+            "version": "1.0",
+            "settings": {"enforcement": "monitor"},
+        }
+        (proc_dir / "registry.yaml").write_text(
+            yaml.dump(registry, default_flow_style=False)
+        )
+
+        engine = Engine(tmp_path)
+        engine.start("guarded", {"task": "test"})
+
+        result = check_enforcement(tmp_path, action="edit")
+        assert result.decision == "warn"
+        assert "does not allow edit" in result.reason
+
+    def test_edit_false_denies_in_enforce(self, tmp_path):
+        """States with edit=false deny edits in enforce mode."""
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir(exist_ok=True)
+
+        defn = {
+            "name": "guarded",
+            "version": "1.0.0",
+            "parameters": [{"name": "task", "required": True}],
+            "states": [
+                {
+                    "id": "start",
+                    "type": "initial",
+                    "permissions": {"edit": False},
+                    "transitions": ["work"],
+                },
+                {"id": "work", "transitions": ["done"]},
+                {"id": "done", "type": "terminal"},
+            ],
+        }
+        (proc_dir / "guarded.yaml").write_text(
+            yaml.dump(defn, default_flow_style=False)
+        )
+
+        registry = {
+            "version": "1.0",
+            "settings": {"enforcement": "enforce"},
+        }
+        (proc_dir / "registry.yaml").write_text(
+            yaml.dump(registry, default_flow_style=False)
+        )
+
+        engine = Engine(tmp_path)
+        engine.start("guarded", {"task": "test"})
+
+        result = check_enforcement(tmp_path, action="edit")
+        assert result.decision == "deny"
+        assert "does not allow edit" in result.reason
+
+    def test_multiple_instances_one_permits(self, tmp_path):
+        """If any non-suspended instance permits the action, allow."""
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir(exist_ok=True)
+
+        # One process with edit=false start, one with edit=true start
+        defn_no_edit = {
+            "name": "read-only",
+            "version": "1.0.0",
+            "parameters": [{"name": "task", "required": True}],
+            "states": [
+                {
+                    "id": "start",
+                    "type": "initial",
+                    "permissions": {"edit": False},
+                    "transitions": ["done"],
+                },
+                {"id": "done", "type": "terminal"},
+            ],
+        }
+        defn_editable = {
+            "name": "editable",
+            "version": "1.0.0",
+            "parameters": [{"name": "task", "required": True}],
+            "states": [
+                {"id": "start", "type": "initial", "transitions": ["done"]},
+                {"id": "done", "type": "terminal"},
+            ],
+        }
+        (proc_dir / "read-only.yaml").write_text(
+            yaml.dump(defn_no_edit, default_flow_style=False)
+        )
+        (proc_dir / "editable.yaml").write_text(
+            yaml.dump(defn_editable, default_flow_style=False)
+        )
+
+        registry = {
+            "version": "1.0",
+            "settings": {"enforcement": "enforce"},
+        }
+        (proc_dir / "registry.yaml").write_text(
+            yaml.dump(registry, default_flow_style=False)
+        )
+
+        engine = Engine(tmp_path)
+        engine.start("read-only", {"task": "a"})
+        engine.start("editable", {"task": "b"})
+
+        result = check_enforcement(tmp_path, action="edit")
+        assert result.decision == "allow"
+        assert "editable" in result.reason
 
 
 class TestGenerateHookConfig:
@@ -227,7 +431,6 @@ class TestInstallEnforcement:
         assert len(settings["hooks"]["PreToolUse"]) == 1
         assert settings["hooks"]["PreToolUse"][0]["matcher"] == "Bash"
 
-
     def test_install_uvx_mode(self, tmp_path):
         proc_dir = tmp_path / ".processes"
         proc_dir.mkdir()
@@ -348,3 +551,29 @@ class TestRunGuard:
 
         captured = capsys.readouterr()
         assert captured.out.strip() == ""
+
+    def test_guard_with_active_surfaces_context(self, tmp_path, monkeypatch, capsys):
+        """Guard should include state context when a process is active."""
+        engine = _setup_project(tmp_path, enforcement="monitor")
+        engine.start("simple", {"task_name": "test"})
+
+        hook_input = json.dumps({
+            "session_id": "test-session",
+            "cwd": str(tmp_path),
+            "tool_name": "Edit",
+            "tool_input": {},
+        })
+
+        import io
+        monkeypatch.setattr("sys.stdin", io.StringIO(hook_input))
+
+        from turnstile_core.guard import run_guard
+        run_guard()
+
+        captured = capsys.readouterr()
+        if captured.out.strip():
+            response = json.loads(captured.out)
+            hook_output = response["hookSpecificOutput"]
+            assert hook_output["permissionDecision"] == "allow"
+            assert "simple" in hook_output["additionalContext"]
+            assert "start" in hook_output["additionalContext"]

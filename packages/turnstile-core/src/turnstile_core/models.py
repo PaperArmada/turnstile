@@ -177,6 +177,17 @@ class SkillDirective(BaseModel):
     args: str = ""
 
 
+class StatePermissions(BaseModel):
+    """Permissions governing what actions are allowed in a state.
+
+    Controls what an agent may do while the process is in this state.
+    The guard checks these on every mutation attempt. Defaults are
+    permissive for backward compatibility; restrict to tighten.
+    """
+
+    edit: bool = True
+
+
 class ProcessState(BaseModel):
     """A single state in the process state machine."""
 
@@ -186,6 +197,7 @@ class ProcessState(BaseModel):
     transitions: list[str] = Field(default_factory=list)
     on_enter: StateHooks | None = None
     on_exit: StateHooks | None = None
+    permissions: StatePermissions = Field(default_factory=StatePermissions)
     metadata: dict[str, Any] = Field(default_factory=dict)
     skill_directives: list[SkillDirective] = Field(default_factory=list)
 
