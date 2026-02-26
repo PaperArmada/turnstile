@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -642,6 +645,296 @@ def init_package(name: str, processes: tuple[str, ...], output: str | None) -> N
     click.echo(f"\nNext steps:")
     click.echo(f"  1. Edit the process definitions in {out_dir}/src/")
     click.echo(f"  2. Build and publish: cd {out_dir} && uv build")
+
+
+def _clone_source(repo_url: str, ref: str = "") -> Path:
+    """Shallow-clone a turnstile source repo into a temp directory.
+
+    Returns the path to the temp directory. Caller must clean up.
+    """
+    tmp = tempfile.mkdtemp(prefix="turnstile-update-")
+    cmd = ["git", "clone", "--depth", "1"]
+    if ref:
+        cmd.extend(["--branch", ref])
+    cmd.extend([repo_url, tmp])
+    subprocess.run(cmd, capture_output=True, text=True, check=True)
+    return Path(tmp)
+
+
+def _load_version(path: Path) -> str | None:
+    """Load just the version from a YAML definition file."""
+    try:
+        defn = load_definition(path)
+        return defn.version
+    except Exception:
+        return None
+
+
+def _compare_definitions(
+    local_dir: Path, source_dir: Path
+) -> list[dict[str, str]]:
+    """Compare local and source process definitions by version.
+
+    Returns a list of dicts with keys: name, local_version, source_version,
+    status (up-to-date, update-available, local-only, new).
+    """
+    results = []
+
+    # Collect source definitions
+    source_defs: dict[str, Path] = {}
+    if source_dir.exists():
+        for path in sorted(source_dir.glob("*.yaml")):
+            if path.name == "registry.yaml":
+                continue
+            try:
+                defn = load_definition(path)
+                source_defs[defn.name] = path
+            except Exception:
+                continue
+
+    # Collect local definitions
+    local_defs: dict[str, Path] = {}
+    if local_dir.exists():
+        for path in sorted(local_dir.glob("*.yaml")):
+            if path.name == "registry.yaml":
+                continue
+            try:
+                defn = load_definition(path)
+                local_defs[defn.name] = path
+            except Exception:
+                continue
+
+    # Compare
+    all_names = sorted(set(list(source_defs.keys()) + list(local_defs.keys())))
+    for name in all_names:
+        local_path = local_defs.get(name)
+        source_path = source_defs.get(name)
+
+        if local_path and source_path:
+            local_ver = _load_version(local_path) or "?"
+            source_ver = _load_version(source_path) or "?"
+            if local_ver == source_ver:
+                # Check if content differs even with same version
+                local_content = local_path.read_text()
+                source_content = source_path.read_text()
+                if local_content == source_content:
+                    status = "up-to-date"
+                else:
+                    status = "modified"
+            else:
+                status = "update-available"
+            results.append({
+                "name": name,
+                "local_version": local_ver,
+                "source_version": source_ver,
+                "local_path": str(local_path),
+                "source_path": str(source_path),
+                "status": status,
+            })
+        elif local_path:
+            local_ver = _load_version(local_path) or "?"
+            results.append({
+                "name": name,
+                "local_version": local_ver,
+                "source_version": "-",
+                "local_path": str(local_path),
+                "source_path": "",
+                "status": "local-only",
+            })
+        elif source_path:
+            source_ver = _load_version(source_path) or "?"
+            results.append({
+                "name": name,
+                "local_version": "-",
+                "source_version": source_ver,
+                "local_path": "",
+                "source_path": str(source_path),
+                "status": "new",
+            })
+
+    return results
+
+
+@cli.command()
+@click.option(
+    "--repo", default=None,
+    help="Git repo URL (defaults to PaperArmada/turnstile).",
+)
+@click.option(
+    "--ref", default="",
+    help="Git ref to fetch (branch, tag). Defaults to the repo's default branch.",
+)
+@click.option(
+    "--apply", "do_apply", is_flag=True, default=False,
+    help="Apply updates (overwrite local files with source versions).",
+)
+@click.option(
+    "--principles", "update_principles", is_flag=True, default=False,
+    help="Also update design principles in .processes/principles/.",
+)
+@click.option(
+    "--dev", is_flag=True, default=False,
+    help="Use local turnstile repo instead of cloning from git.",
+)
+@click.option(
+    "--turnstile-dir", default=None,
+    help="Path to turnstile repo (dev mode, auto-detected if omitted).",
+)
+@click.pass_context
+def update(
+    ctx: click.Context,
+    repo: str | None,
+    ref: str,
+    do_apply: bool,
+    update_principles: bool,
+    dev: bool,
+    turnstile_dir: str | None,
+) -> None:
+    """Check for and apply updates to process definitions.
+
+    Compares local .processes/*.yaml files against the source repo and
+    shows which definitions have newer versions available. By default,
+    only shows a comparison table. Use --apply to overwrite local files.
+
+    \b
+    Examples:
+      turnstile update                  # Show what's available
+      turnstile update --apply          # Apply definition updates
+      turnstile update --principles     # Also refresh design principles
+      turnstile update --dev            # Use local repo instead of git
+    """
+    root = Path(ctx.obj["project"]) if ctx.obj.get("project") else Path.cwd()
+    local_dir = root / ".processes"
+
+    if not local_dir.exists():
+        click.echo(
+            "No .processes/ directory found. Run 'turnstile init' first.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    # Resolve source directory
+    source_tmp: Path | None = None
+    try:
+        if dev:
+            source_root = Path(
+                turnstile_dir or _find_turnstile_root()
+            )
+            source_dir = source_root / ".processes"
+            if not source_dir.exists():
+                click.echo(
+                    f"No .processes/ in turnstile repo at {source_root}",
+                    err=True,
+                )
+                raise SystemExit(1)
+        else:
+            repo_url = repo or TURNSTILE_REPO_URL
+            click.echo(f"Fetching from {repo_url}...")
+            try:
+                source_tmp = _clone_source(repo_url, ref)
+            except subprocess.CalledProcessError as e:
+                click.echo(
+                    f"Failed to clone: {e.stderr or e.stdout or str(e)}",
+                    err=True,
+                )
+                raise SystemExit(1)
+            except FileNotFoundError:
+                click.echo("git is not installed or not in PATH", err=True)
+                raise SystemExit(1)
+            source_dir = source_tmp / ".processes"
+
+        # Compare definitions
+        comparisons = _compare_definitions(local_dir, source_dir)
+
+        if not comparisons:
+            click.echo("No process definitions found to compare.")
+            return
+
+        # Display comparison table
+        has_updates = False
+        click.echo(f"\n{'Name':<25} {'Local':<12} {'Source':<12} Status")
+        click.echo("-" * 65)
+        for c in comparisons:
+            status_display = c["status"]
+            if c["status"] == "update-available":
+                status_display = "UPDATE AVAILABLE"
+                has_updates = True
+            elif c["status"] == "modified":
+                status_display = "content differs (same version)"
+                has_updates = True
+            elif c["status"] == "new":
+                status_display = "new in source"
+                has_updates = True
+            elif c["status"] == "local-only":
+                status_display = "local only"
+            click.echo(
+                f"  {c['name']:<23} {c['local_version']:<12} "
+                f"{c['source_version']:<12} {status_display}"
+            )
+
+        # Check principles
+        principles_dir = local_dir / "principles"
+        principles_stale = False
+        if principles_dir.exists():
+            for name, content in PRINCIPLES.items():
+                local_file = principles_dir / f"{name}.md"
+                if not local_file.exists() or local_file.read_text() != content:
+                    principles_stale = True
+                    break
+        elif PRINCIPLES:
+            principles_stale = True
+
+        if principles_stale:
+            click.echo(f"\nDesign principles: updates available")
+        else:
+            click.echo(f"\nDesign principles: up to date")
+
+        if not has_updates and not principles_stale:
+            click.echo("\nEverything is up to date.")
+            return
+
+        if not do_apply and not update_principles:
+            click.echo(
+                "\nRun with --apply to update definitions"
+                " or --principles to update principles."
+            )
+            return
+
+        # Apply updates
+        updated = 0
+        if do_apply:
+            for c in comparisons:
+                if c["status"] in ("update-available", "modified", "new"):
+                    source_path = Path(c["source_path"])
+                    if c["status"] == "new":
+                        target = local_dir / source_path.name
+                    else:
+                        target = Path(c["local_path"])
+                    shutil.copy2(source_path, target)
+                    click.echo(f"  Updated: {target.name}")
+                    updated += 1
+
+        if update_principles:
+            if not principles_dir.exists():
+                principles_dir.mkdir(parents=True)
+            written = 0
+            for name, content in PRINCIPLES.items():
+                target = principles_dir / f"{name}.md"
+                if not target.exists() or target.read_text() != content:
+                    target.write_text(content)
+                    written += 1
+            if written:
+                click.echo(f"  Updated: {written} principle(s)")
+                updated += written
+
+        if updated:
+            click.echo(f"\n{updated} file(s) updated.")
+        else:
+            click.echo("\nNo files were updated.")
+
+    finally:
+        if source_tmp and source_tmp.exists():
+            shutil.rmtree(source_tmp, ignore_errors=True)
 
 
 @cli.command()
