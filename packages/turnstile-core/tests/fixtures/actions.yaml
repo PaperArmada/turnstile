@@ -1,0 +1,32 @@
+name: actions
+description: "Process with on_enter and on_exit actions for testing"
+version: "1.0.0"
+
+parameters:
+  - name: marker_dir
+    description: "Directory for marker files"
+    required: true
+
+states:
+  - id: start
+    type: initial
+    transitions: [working]
+    on_exit:
+      actions:
+        - command: "touch ${marker_dir}/exit_start"
+
+  - id: working
+    description: "Do the work"
+    transitions: [done]
+    on_enter:
+      actions:
+        - command: "touch ${marker_dir}/enter_working"
+    on_exit:
+      actions:
+        - command: "touch ${marker_dir}/exit_working"
+
+  - id: done
+    type: terminal
+    on_enter:
+      actions:
+        - command: "touch ${marker_dir}/enter_done"

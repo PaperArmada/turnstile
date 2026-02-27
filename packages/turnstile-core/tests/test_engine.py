@@ -152,6 +152,67 @@ class TestTransition:
         assert len(result.validation_results) > 0
 
 
+class TestActions:
+    """Tests for on_enter and on_exit action execution."""
+
+    @pytest.fixture()
+    def actions_project(self, tmp_path) -> Path:
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir()
+        shutil.copy(FIXTURES / "actions.yaml", proc_dir / "actions.yaml")
+        return tmp_path
+
+    @pytest.fixture()
+    def actions_engine(self, actions_project: Path) -> Engine:
+        return Engine(actions_project)
+
+    @pytest.mark.asyncio
+    async def test_on_exit_actions_run(self, actions_engine: Engine, tmp_path: Path):
+        """on_exit actions should execute when leaving a state."""
+        marker_dir = tmp_path / "markers"
+        marker_dir.mkdir()
+
+        started = actions_engine.start("actions", {"marker_dir": str(marker_dir)})
+        iid = started["instance_id"]
+
+        await actions_engine.transition(iid, "working")
+
+        assert (marker_dir / "exit_start").exists(), "on_exit action for 'start' did not run"
+        assert (marker_dir / "enter_working").exists(), "on_enter action for 'working' did not run"
+
+    @pytest.mark.asyncio
+    async def test_on_exit_actions_run_before_on_enter(self, actions_engine: Engine, tmp_path: Path):
+        """on_exit actions run before on_enter actions (exit current, then enter target)."""
+        marker_dir = tmp_path / "markers"
+        marker_dir.mkdir()
+
+        started = actions_engine.start("actions", {"marker_dir": str(marker_dir)})
+        iid = started["instance_id"]
+
+        await actions_engine.transition(iid, "working")
+
+        exit_time = (marker_dir / "exit_start").stat().st_mtime_ns
+        enter_time = (marker_dir / "enter_working").stat().st_mtime_ns
+        assert exit_time <= enter_time
+
+    @pytest.mark.asyncio
+    async def test_on_exit_actions_full_path(self, actions_engine: Engine, tmp_path: Path):
+        """on_exit and on_enter actions fire at every transition."""
+        marker_dir = tmp_path / "markers"
+        marker_dir.mkdir()
+
+        started = actions_engine.start("actions", {"marker_dir": str(marker_dir)})
+        iid = started["instance_id"]
+
+        await actions_engine.transition(iid, "working")
+        await actions_engine.transition(iid, "done")
+
+        assert (marker_dir / "exit_start").exists()
+        assert (marker_dir / "enter_working").exists()
+        assert (marker_dir / "exit_working").exists()
+        assert (marker_dir / "enter_done").exists()
+
+
 class TestStatus:
     def test_single_instance(self, engine: Engine):
         started = engine.start("simple", {"task_name": "test"})
