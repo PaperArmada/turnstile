@@ -183,9 +183,14 @@ class StatePermissions(BaseModel):
     Controls what an agent may do while the process is in this state.
     The guard checks these on every mutation attempt. Defaults are
     permissive for backward compatibility; restrict to tighten.
+
+    edit_paths restricts which files may be edited when edit is True.
+    Uses glob patterns relative to the project root (e.g. "src/**").
+    Empty list means all paths are allowed.
     """
 
     edit: bool = True
+    edit_paths: list[str] = Field(default_factory=list)
 
 
 class ProcessState(BaseModel):
