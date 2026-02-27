@@ -46,7 +46,7 @@ states:
           message: "Issue linkage check"
           severity: info
 
-        - command: "${test_command} -q --no-header 2>&1 | tail -1 || echo 'no test output'"
+        - command: "${test_command} 2>&1 | tail -1 || echo 'no test output'"
           expect: not_empty
           message: "Current test suite status (baseline before changes)"
           severity: info
@@ -76,12 +76,12 @@ states:
     on_exit:
       validate:
         # Hard gate: tests must pass
-        - command: "${test_command} -q --no-header 2>&1 | tail -1"
+        - command: "${test_command} 2>&1 | tail -1"
           expect: contains("passed")
           message: "Test suite must pass"
 
         # Check no test regressions
-        - command: "${test_command} -q --no-header 2>&1 | tail -1 | grep -oP '\\d+(?= passed)'"
+        - command: "${test_command} 2>&1 | tail -1 | grep -oP '\\d+(?= passed)'"
           expect: not_empty
           message: "Test count (verify no regressions)"
           severity: info
