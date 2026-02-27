@@ -682,3 +682,134 @@ class TestRunGuard:
             assert hook_output["permissionDecision"] == "allow"
             assert "simple" in hook_output["additionalContext"]
             assert "start" in hook_output["additionalContext"]
+
+
+class TestAssertiveBanner:
+    """Test that guard guidance uses assertive framing for agent grounding."""
+
+    def test_guidance_uses_assertive_framing(self, tmp_path):
+        engine = _setup_project(tmp_path, enforcement="monitor")
+        engine.start("simple", {"task_name": "test"})
+
+        result = check_enforcement(tmp_path)
+        assert "You are in:" in result.guidance
+        assert "simple @ start" in result.guidance
+
+    def test_guidance_includes_instance_id(self, tmp_path):
+        engine = _setup_project(tmp_path, enforcement="enforce")
+        started = engine.start("simple", {"task_name": "test"})
+        iid = started["instance_id"]
+
+        result = check_enforcement(tmp_path)
+        assert f"instance {iid}" in result.guidance
+
+    def test_guidance_shows_transitions(self, tmp_path):
+        engine = _setup_project(tmp_path, enforcement="monitor")
+        engine.start("simple", {"task_name": "test"})
+
+        result = check_enforcement(tmp_path)
+        assert "Next: working" in result.guidance
+
+
+class TestEditPaths:
+    """Test path-scoped edit permissions."""
+
+    def _setup_path_restricted(self, tmp_path, enforcement="enforce", edit_paths=None):
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir(exist_ok=True)
+
+        defn = {
+            "name": "scoped",
+            "version": "1.0.0",
+            "parameters": [{"name": "task", "required": True}],
+            "states": [
+                {
+                    "id": "start",
+                    "type": "initial",
+                    "permissions": {"edit": True, "edit_paths": edit_paths or []},
+                    "transitions": ["done"],
+                },
+                {"id": "done", "type": "terminal"},
+            ],
+        }
+        (proc_dir / "scoped.yaml").write_text(
+            yaml.dump(defn, default_flow_style=False)
+        )
+
+        registry = {
+            "version": "1.0",
+            "settings": {"enforcement": enforcement},
+        }
+        (proc_dir / "registry.yaml").write_text(
+            yaml.dump(registry, default_flow_style=False)
+        )
+
+        engine = Engine(tmp_path)
+        engine.start("scoped", {"task": "test"})
+        return engine
+
+    def test_no_edit_paths_allows_all(self, tmp_path):
+        """Empty edit_paths means no restriction."""
+        self._setup_path_restricted(tmp_path, edit_paths=[])
+        result = check_enforcement(
+            tmp_path, action="edit",
+            file_path=str(tmp_path / "anything" / "file.py"),
+        )
+        assert result.decision == "allow"
+
+    def test_matching_path_allows(self, tmp_path):
+        """File matching an edit_paths pattern is allowed."""
+        self._setup_path_restricted(tmp_path, edit_paths=["src/*"])
+        result = check_enforcement(
+            tmp_path, action="edit",
+            file_path=str(tmp_path / "src" / "main.py"),
+        )
+        assert result.decision == "allow"
+
+    def test_non_matching_path_denies(self, tmp_path):
+        """File outside edit_paths is denied in enforce mode."""
+        self._setup_path_restricted(tmp_path, edit_paths=["src/*"])
+        result = check_enforcement(
+            tmp_path, action="edit",
+            file_path=str(tmp_path / "docs" / "readme.md"),
+        )
+        assert result.decision == "deny"
+        assert "outside allowed edit paths" in result.reason
+
+    def test_non_matching_path_warns_in_monitor(self, tmp_path):
+        """File outside edit_paths warns in monitor mode."""
+        self._setup_path_restricted(
+            tmp_path, enforcement="monitor", edit_paths=["src/*"]
+        )
+        result = check_enforcement(
+            tmp_path, action="edit",
+            file_path=str(tmp_path / "docs" / "readme.md"),
+        )
+        assert result.decision == "warn"
+        assert "outside allowed edit paths" in result.reason
+
+    def test_glob_pattern_matching(self, tmp_path):
+        """Glob patterns like src/** match nested paths."""
+        self._setup_path_restricted(tmp_path, edit_paths=["src/**"])
+        result = check_enforcement(
+            tmp_path, action="edit",
+            file_path=str(tmp_path / "src" / "sub" / "deep.py"),
+        )
+        assert result.decision == "allow"
+
+    def test_multiple_patterns(self, tmp_path):
+        """File matching any one of multiple patterns is allowed."""
+        self._setup_path_restricted(
+            tmp_path, edit_paths=["src/*", "tests/*"]
+        )
+        result = check_enforcement(
+            tmp_path, action="edit",
+            file_path=str(tmp_path / "tests" / "test_foo.py"),
+        )
+        assert result.decision == "allow"
+
+    def test_no_file_path_skips_check(self, tmp_path):
+        """When no file_path is provided, path check is skipped."""
+        self._setup_path_restricted(tmp_path, edit_paths=["src/*"])
+        result = check_enforcement(tmp_path, action="edit")
+        assert result.decision == "allow"

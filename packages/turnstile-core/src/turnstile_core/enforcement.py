@@ -12,6 +12,8 @@ state and process definitions but never modifies them.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +33,7 @@ class EnforcementContext:
     available_transitions: list[str]
     permissions: StatePermissions
     suspended: bool = False
+    staleness_hint: str = ""
 
 
 @dataclass
@@ -76,20 +79,45 @@ def _build_context(
         available_transitions=transitions,
         permissions=permissions,
         suspended=instance.suspended,
+        staleness_hint=_staleness_hint(instance.updated_at),
     )
 
 
+def _staleness_hint(updated_at: str) -> str:
+    """Return a staleness warning if the instance hasn't been updated recently."""
+    try:
+        updated = datetime.fromisoformat(updated_at)
+        now = datetime.now(timezone.utc)
+        age = now - updated
+        hours = age.total_seconds() / 3600
+        if hours >= 24:
+            days = int(hours // 24)
+            return f"  STALE: last transition {days}d ago. Verify this is still your active work."
+        if hours >= 4:
+            return f"  Note: last transition {int(hours)}h ago."
+    except (ValueError, TypeError):
+        pass
+    return ""
+
+
 def _format_guidance(contexts: list[EnforcementContext], action: str) -> str:
-    """Generate actionable guidance for the agent."""
+    """Generate assertive state guidance for the agent.
+
+    Uses declarative framing ('You are in: ...') rather than passive
+    status lines so the output overrides stale mental models after
+    compaction or session restart.
+    """
     if not contexts:
         return ""
 
+    non_suspended = [c for c in contexts if not c.suspended]
+    suspended = [c for c in contexts if c.suspended]
+
     lines = []
-    for ctx in contexts:
-        if ctx.suspended:
-            continue
+    for ctx in non_suspended:
         lines.append(
-            f"[{ctx.instance_id}] {ctx.process_name} @ {ctx.current_state}"
+            f"You are in: {ctx.process_name} @ {ctx.current_state} "
+            f"(instance {ctx.instance_id})"
         )
         if ctx.state_description:
             lines.append(f"  {ctx.state_description}")
@@ -97,7 +125,47 @@ def _format_guidance(contexts: list[EnforcementContext], action: str) -> str:
             lines.append(
                 f"  Next: {', '.join(ctx.available_transitions)}"
             )
+        if ctx.staleness_hint:
+            lines.append(ctx.staleness_hint)
+
+    if suspended:
+        for ctx in suspended:
+            lines.append(
+                f"Suspended: {ctx.process_name} @ {ctx.current_state} "
+                f"(instance {ctx.instance_id}, waiting on subprocess)"
+            )
+
+    if len(non_suspended) == 0 and len(suspended) > 0:
+        lines.append("No active (non-suspended) processes.")
+
     return "\n".join(lines)
+
+
+def _check_edit_paths(
+    contexts: list[EnforcementContext],
+    file_path: str,
+    project_root: Path,
+) -> bool:
+    """Check if file_path matches edit_paths for any permitting context.
+
+    Returns True if:
+    - No context has edit_paths restrictions (empty list), or
+    - The file path matches at least one pattern in at least one context.
+
+    Patterns are matched relative to project_root using fnmatch.
+    """
+    for ctx in contexts:
+        if not ctx.permissions.edit_paths:
+            return True  # No restrictions on this context
+        # Make file_path relative to project root for matching
+        try:
+            rel = str(Path(file_path).resolve().relative_to(project_root.resolve()))
+        except ValueError:
+            rel = file_path  # Already relative or outside project
+        for pattern in ctx.permissions.edit_paths:
+            if fnmatch(rel, pattern):
+                return True
+    return False
 
 
 def _suggest_processes(project_root: Path, file_path: str = "") -> str:
@@ -203,6 +271,27 @@ def check_enforcement(
     ]
 
     if permitted_by:
+        # Check path restrictions if file_path is provided
+        if file_path and action == "edit":
+            path_ok = _check_edit_paths(permitted_by, file_path, project_root)
+            if not path_ok:
+                allowed_patterns = permitted_by[0].permissions.edit_paths
+                reason = (
+                    f"File '{file_path}' is outside allowed edit paths "
+                    f"for {permitted_by[0].process_name} @ "
+                    f"{permitted_by[0].current_state}: "
+                    f"{', '.join(allowed_patterns)}"
+                )
+                if mode == "monitor":
+                    return EnforcementResult(
+                        decision="warn", reason=reason,
+                        context=contexts, guidance=guidance,
+                    )
+                return EnforcementResult(
+                    decision="deny", reason=reason,
+                    context=contexts, guidance=guidance,
+                )
+
         # At least one active instance permits this action in its current state
         return EnforcementResult(
             decision="allow",
