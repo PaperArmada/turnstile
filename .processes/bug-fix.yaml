@@ -80,11 +80,11 @@ states:
 
     on_exit:
       validate:
-        - command: "${test_command} -q --no-header 2>&1 | tail -1"
+        - command: "${test_command} 2>&1 | tail -1"
           expect: contains("passed")
           message: "Test suite must pass"
 
-        - command: "${test_command} -q --no-header 2>&1 | tail -1 | grep -oP '\\d+(?= passed)'"
+        - command: "${test_command} 2>&1 | tail -1 | grep -oP '\\d+(?= passed)'"
           expect: not_empty
           message: "Test count (verify no regressions)"
           severity: info
