@@ -373,6 +373,15 @@ class Engine:
                     message="on_exit validation failed",
                 )
 
+        # Run on_exit actions for current state
+        if current.on_exit and current.on_exit.actions:
+            for action in current.on_exit.actions:
+                cmd = substitute_params(action.command, instance.parameters)
+                try:
+                    await run_command(cmd, self.project_root, timeout=60)
+                except Exception:
+                    pass  # Actions are best-effort
+
         # Run on_enter validations for target state
         if target.on_enter and target.on_enter.validations:
             enter_results = await run_validations(
