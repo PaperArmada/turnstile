@@ -1,0 +1,24 @@
+name: required-metadata
+description: "Process with required transition metadata"
+version: "1.0.0"
+
+parameters:
+  - name: task_name
+    required: true
+
+states:
+  - id: start
+    type: initial
+    transitions: [review]
+    required_metadata:
+      - key: summary
+        description: "Brief summary of what was done"
+      - key: confidence
+        description: "Confidence level (high/medium/low)"
+
+  - id: review
+    description: "Review the work"
+    transitions: [done, start]
+
+  - id: done
+    type: terminal

@@ -813,3 +813,99 @@ class TestEditPaths:
         self._setup_path_restricted(tmp_path, edit_paths=["src/*"])
         result = check_enforcement(tmp_path, action="edit")
         assert result.decision == "allow"
+
+
+class TestPathCatalogue:
+    """Test path_catalogue in registry settings for process suggestions."""
+
+    def _setup_with_catalogue(self, tmp_path, catalogue, enforcement="monitor"):
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir(exist_ok=True)
+        shutil.copy(FIXTURES / "simple.yaml", proc_dir / "simple.yaml")
+        shutil.copy(FIXTURES / "quick-fix.yaml", proc_dir / "quick-fix.yaml")
+
+        registry = {
+            "version": "1.0",
+            "settings": {
+                "enforcement": enforcement,
+                "path_catalogue": catalogue,
+            },
+        }
+        (proc_dir / "registry.yaml").write_text(
+            yaml.dump(registry, default_flow_style=False)
+        )
+
+    def test_no_catalogue_lists_all(self, tmp_path):
+        """Without catalogue, all processes are suggested."""
+        self._setup_with_catalogue(tmp_path, {})
+        result = check_enforcement(
+            tmp_path, action="edit", file_path="src/main.py"
+        )
+        assert "simple" in result.guidance
+        assert "quick-fix" in result.guidance
+
+    def test_catalogue_narrows_suggestions(self, tmp_path):
+        """Catalogue narrows suggestions to matching processes."""
+        self._setup_with_catalogue(tmp_path, {
+            "src/*": ["simple"],
+            "docs/*": ["quick-fix"],
+        })
+        result = check_enforcement(
+            tmp_path, action="edit", file_path="src/main.py"
+        )
+        assert "simple" in result.guidance
+        assert "quick-fix" not in result.guidance
+        assert "Suggested processes for" in result.guidance
+
+    def test_catalogue_no_match_lists_all(self, tmp_path):
+        """When file doesn't match any catalogue entry, list all."""
+        self._setup_with_catalogue(tmp_path, {
+            "src/*": ["simple"],
+        })
+        result = check_enforcement(
+            tmp_path, action="edit", file_path="lib/util.py"
+        )
+        assert "Available processes:" in result.guidance
+        assert "simple" in result.guidance
+        assert "quick-fix" in result.guidance
+
+    def test_catalogue_mismatch_hint(self, tmp_path):
+        """Active process not in catalogue shows hint."""
+        self._setup_with_catalogue(tmp_path, {
+            "src/*": ["quick-fix"],
+        })
+        engine = Engine(tmp_path)
+        engine.start("simple", {"task_name": "test"})
+
+        result = check_enforcement(
+            tmp_path, action="edit", file_path="src/main.py"
+        )
+        assert result.decision == "allow"
+        assert "Catalogue hint" in result.guidance
+        assert "quick-fix" in result.guidance
+
+    def test_catalogue_match_no_hint(self, tmp_path):
+        """Active process matching catalogue doesn't show hint."""
+        self._setup_with_catalogue(tmp_path, {
+            "src/*": ["simple"],
+        })
+        engine = Engine(tmp_path)
+        engine.start("simple", {"task_name": "test"})
+
+        result = check_enforcement(
+            tmp_path, action="edit", file_path="src/main.py"
+        )
+        assert result.decision == "allow"
+        assert "Catalogue hint" not in result.guidance
+
+    def test_catalogue_multiple_patterns(self, tmp_path):
+        """File matching multiple catalogue entries merges process lists."""
+        self._setup_with_catalogue(tmp_path, {
+            "src/*": ["simple"],
+            "src/*.py": ["quick-fix"],
+        })
+        result = check_enforcement(
+            tmp_path, action="edit", file_path="src/main.py"
+        )
+        assert "simple" in result.guidance
+        assert "quick-fix" in result.guidance
