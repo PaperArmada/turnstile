@@ -168,8 +168,16 @@ def _check_edit_paths(
     return False
 
 
-def _suggest_processes(project_root: Path, file_path: str = "") -> str:
+def _suggest_processes(
+    project_root: Path,
+    file_path: str = "",
+    path_catalogue: dict[str, list[str]] | None = None,
+) -> str:
     """Build a process suggestion list from available definitions.
+
+    When path_catalogue is provided and file_path matches a catalogue
+    entry, narrows suggestions to the mapped processes. Otherwise
+    lists all available processes.
 
     Returns a formatted string listing available processes with descriptions,
     suitable for inclusion in enforcement guidance.
@@ -182,8 +190,19 @@ def _suggest_processes(project_root: Path, file_path: str = "") -> str:
     if not discovered:
         return "No process definitions found. Run 'turnstile init' first."
 
-    lines = ["Available processes:"]
-    for name in sorted(discovered):
+    # Narrow to catalogue matches if possible
+    catalogue_matches = _match_catalogue(file_path, path_catalogue) if file_path and path_catalogue else []
+    show_names = set(catalogue_matches) if catalogue_matches else set(discovered)
+
+    lines = []
+    if catalogue_matches:
+        lines.append(f"Suggested processes for '{file_path}':")
+    else:
+        lines.append("Available processes:")
+
+    for name in sorted(show_names):
+        if name not in discovered:
+            continue
         defn = discovered[name].definition
         desc = defn.description or ""
         params = [p.name for p in defn.parameters if p.required]
@@ -199,6 +218,22 @@ def _suggest_processes(project_root: Path, file_path: str = "") -> str:
     )
 
     return "\n".join(lines)
+
+
+def _match_catalogue(
+    file_path: str,
+    catalogue: dict[str, list[str]],
+) -> list[str]:
+    """Return process names from catalogue whose glob patterns match file_path.
+
+    Catalogue keys are glob patterns (e.g. "src/**", "docs/*").
+    Values are lists of process names that cover that directory.
+    """
+    matched: list[str] = []
+    for pattern, processes in catalogue.items():
+        if fnmatch(file_path, pattern):
+            matched.extend(p for p in processes if p not in matched)
+    return matched
 
 
 def check_enforcement(
@@ -232,7 +267,10 @@ def check_enforcement(
 
     if not active:
         reason = f"No active turnstile process ({mode} mode)"
-        guidance = _suggest_processes(project_root, file_path)
+        guidance = _suggest_processes(
+            project_root, file_path,
+            path_catalogue=registry.settings.path_catalogue or None,
+        )
         if mode == "monitor":
             return EnforcementResult(
                 decision="warn", reason=reason, guidance=guidance
@@ -291,6 +329,20 @@ def check_enforcement(
                     decision="deny", reason=reason,
                     context=contexts, guidance=guidance,
                 )
+
+        # Check catalogue mismatch: active process exists but doesn't
+        # match the catalogue for the file being edited (advisory only)
+        if file_path and registry.settings.path_catalogue:
+            catalogue_procs = _match_catalogue(
+                file_path, registry.settings.path_catalogue,
+            )
+            if catalogue_procs:
+                active_names = {c.process_name for c in permitted_by}
+                if not active_names & set(catalogue_procs):
+                    guidance += (
+                        f"\n  Catalogue hint: '{file_path}' is typically "
+                        f"covered by: {', '.join(catalogue_procs)}"
+                    )
 
         # At least one active instance permits this action in its current state
         return EnforcementResult(

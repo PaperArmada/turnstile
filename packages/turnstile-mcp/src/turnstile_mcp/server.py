@@ -139,6 +139,8 @@ async def process_transition(
         response["parent_available_transitions"] = result.parent_available_transitions
     if result.skill_directives:
         response["skill_directives"] = result.skill_directives
+    if result.required_metadata:
+        response["required_metadata"] = result.required_metadata
     if result.summary:
         response["summary"] = result.summary
     return response

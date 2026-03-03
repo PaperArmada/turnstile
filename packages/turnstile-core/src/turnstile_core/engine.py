@@ -62,6 +62,8 @@ class TransitionResult:
     parent_available_transitions: list[str] = field(default_factory=list)
     # Skill directives for the target state
     skill_directives: list[dict[str, str]] = field(default_factory=list)
+    # Required metadata to transition out of the new state
+    required_metadata: list[dict[str, str]] = field(default_factory=list)
     # Summary on terminal state completion
     summary: dict[str, Any] | None = None
 
@@ -204,8 +206,18 @@ class Engine:
                 state_info["description"] = s.description
             if s.transitions:
                 state_info["transitions"] = s.transitions
+            perms: dict[str, Any] = {}
             if not s.permissions.edit:
-                state_info["permissions"] = {"edit": False}
+                perms["edit"] = False
+            if s.permissions.edit_paths:
+                perms["edit_paths"] = s.permissions.edit_paths
+            if perms:
+                state_info["permissions"] = perms
+            if s.required_metadata:
+                state_info["required_metadata"] = [
+                    {"key": rm.key, "description": rm.description}
+                    for rm in s.required_metadata
+                ]
             states.append(state_info)
 
         result: dict[str, Any] = {
@@ -275,6 +287,11 @@ class Engine:
                 "history_length": len(instance.history),
                 "suspended": instance.suspended,
             }
+            if state and state.required_metadata:
+                info["required_metadata"] = [
+                    {"key": rm.key, "description": rm.description}
+                    for rm in state.required_metadata
+                ]
             if instance.suspended:
                 info["child_instance_id"] = instance.child_instance_id
             if instance.parent_instance_id:
@@ -352,6 +369,28 @@ class Engine:
             raise TransitionError(
                 f"Target state '{target_state}' not found in definition"
             )
+
+        # Check required metadata for current state
+        if current.required_metadata:
+            provided = metadata or {}
+            missing = [
+                rm.key for rm in current.required_metadata
+                if rm.key not in provided
+            ]
+            if missing:
+                descriptions = {
+                    rm.key: rm.description
+                    for rm in current.required_metadata
+                    if rm.key in missing
+                }
+                detail = ", ".join(
+                    f"'{k}' ({descriptions[k]})" if descriptions[k] else f"'{k}'"
+                    for k in missing
+                )
+                raise TransitionError(
+                    f"State '{current.id}' requires metadata: {detail}. "
+                    f"Pass metadata={{...}} with the transition."
+                )
 
         all_results: list[ValidationResult] = []
 
@@ -470,6 +509,10 @@ class Engine:
             skill_directives=[
                 {"skill": sd.skill, "args": sd.args}
                 for sd in target.skill_directives
+            ],
+            required_metadata=[
+                {"key": rm.key, "description": rm.description}
+                for rm in target.required_metadata
             ],
         )
 

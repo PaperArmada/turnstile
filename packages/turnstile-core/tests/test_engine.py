@@ -383,6 +383,118 @@ class TestHistory:
         assert hist[0]["metadata"] == {"reason": "hotfix"}
 
 
+class TestRequiredMetadata:
+    """Test required_metadata enforcement on transitions."""
+
+    @pytest.fixture()
+    def rm_engine(self, tmp_path) -> Engine:
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir()
+        shutil.copy(
+            FIXTURES / "required-metadata.yaml",
+            proc_dir / "required-metadata.yaml",
+        )
+        return Engine(tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_missing_metadata_raises(self, rm_engine: Engine):
+        """Transition without required metadata raises TransitionError."""
+        started = rm_engine.start("required-metadata", {"task_name": "test"})
+        iid = started["instance_id"]
+
+        with pytest.raises(TransitionError, match="requires metadata"):
+            await rm_engine.transition(iid, "review")
+
+    @pytest.mark.asyncio
+    async def test_partial_metadata_raises(self, rm_engine: Engine):
+        """Providing only some required keys raises TransitionError."""
+        started = rm_engine.start("required-metadata", {"task_name": "test"})
+        iid = started["instance_id"]
+
+        with pytest.raises(TransitionError, match="'confidence'"):
+            await rm_engine.transition(
+                iid, "review", metadata={"summary": "did the thing"}
+            )
+
+    @pytest.mark.asyncio
+    async def test_all_metadata_allows_transition(self, rm_engine: Engine):
+        """Providing all required keys allows the transition."""
+        started = rm_engine.start("required-metadata", {"task_name": "test"})
+        iid = started["instance_id"]
+
+        result = await rm_engine.transition(
+            iid, "review",
+            metadata={"summary": "implemented feature", "confidence": "high"},
+        )
+        assert result.success is True
+        assert result.new_state == "review"
+
+    @pytest.mark.asyncio
+    async def test_metadata_stored_in_history(self, rm_engine: Engine):
+        """Required metadata is persisted in history."""
+        started = rm_engine.start("required-metadata", {"task_name": "test"})
+        iid = started["instance_id"]
+
+        await rm_engine.transition(
+            iid, "review",
+            metadata={"summary": "the fix", "confidence": "high"},
+        )
+
+        hist = rm_engine.history(iid)
+        assert hist[0]["metadata"]["summary"] == "the fix"
+        assert hist[0]["metadata"]["confidence"] == "high"
+
+    @pytest.mark.asyncio
+    async def test_no_required_metadata_state_ok(self, rm_engine: Engine):
+        """States without required_metadata don't enforce."""
+        started = rm_engine.start("required-metadata", {"task_name": "test"})
+        iid = started["instance_id"]
+
+        await rm_engine.transition(
+            iid, "review",
+            metadata={"summary": "done", "confidence": "high"},
+        )
+        # review has no required_metadata, so transitioning without metadata is fine
+        result = await rm_engine.transition(iid, "done")
+        assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_required_metadata_in_transition_result(self, rm_engine: Engine):
+        """TransitionResult includes required_metadata for the target state."""
+        started = rm_engine.start("required-metadata", {"task_name": "test"})
+        iid = started["instance_id"]
+
+        # start has required_metadata; transitioning to review should
+        # include review's required_metadata (which is empty) in the result
+        result = await rm_engine.transition(
+            iid, "review",
+            metadata={"summary": "done", "confidence": "high"},
+        )
+        assert result.required_metadata == []
+
+    def test_required_metadata_in_status(self, rm_engine: Engine):
+        """Status shows required_metadata for the current state."""
+        started = rm_engine.start("required-metadata", {"task_name": "test"})
+        iid = started["instance_id"]
+
+        status = rm_engine.status(iid)
+        assert "required_metadata" in status
+        keys = [rm["key"] for rm in status["required_metadata"]]
+        assert "summary" in keys
+        assert "confidence" in keys
+
+    def test_required_metadata_in_info(self, rm_engine: Engine):
+        """process_info surfaces required_metadata on states."""
+        info = rm_engine.info("required-metadata")
+        start_state = [s for s in info["states"] if s["id"] == "start"][0]
+        assert "required_metadata" in start_state
+        assert len(start_state["required_metadata"]) == 2
+
+        # review has no required_metadata, so it shouldn't appear
+        review_state = [s for s in info["states"] if s["id"] == "review"][0]
+        assert "required_metadata" not in review_state
+
+
 class TestValidateDefinition:
     def test_valid(self, engine: Engine):
         result = engine.validate_definition(str(FIXTURES / "simple.yaml"))

@@ -177,6 +177,13 @@ class SkillDirective(BaseModel):
     args: str = ""
 
 
+class RequiredMetadata(BaseModel):
+    """A metadata key required on transitions out of a state."""
+
+    key: str
+    description: str = ""
+
+
 class StatePermissions(BaseModel):
     """Permissions governing what actions are allowed in a state.
 
@@ -205,6 +212,7 @@ class ProcessState(BaseModel):
     permissions: StatePermissions = Field(default_factory=StatePermissions)
     metadata: dict[str, Any] = Field(default_factory=dict)
     skill_directives: list[SkillDirective] = Field(default_factory=list)
+    required_metadata: list[RequiredMetadata] = Field(default_factory=list)
 
     # Subprocess-specific fields
     process: str | None = None
@@ -361,6 +369,7 @@ class RegistrySettings(BaseModel):
     require_override_reason: bool = True
     notifications: dict[str, str] = Field(default_factory=dict)
     enforcement: str = "off"  # off, monitor, enforce
+    path_catalogue: dict[str, list[str]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _validate_enforcement(self) -> RegistrySettings:
