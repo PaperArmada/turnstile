@@ -480,6 +480,55 @@ class Engine:
                 except Exception:
                     pass  # Actions are best-effort
 
+        # Handle dispatch states (async subprocess: create child, don't suspend)
+        if target.type == StateType.dispatch:
+            child_result = self._dispatch_child(instance, target)
+            immediate_state = defn.get_state(target.immediate)
+            if immediate_state is None:
+                raise TransitionError(
+                    f"Dispatch immediate target '{target.immediate}' "
+                    f"not found in definition"
+                )
+
+            # Second history entry for the automatic transition
+            auto_entry = HistoryEntry(**{
+                "from": target_state,
+                "to": target.immediate,
+                "at": _now_iso(),
+                "triggered_by": f"dispatch: {target.process}",
+                "role": immediate_state.role,
+                "session_id": session_id,
+                "metadata": {
+                    "dispatched_instance": child_result["instance_id"],
+                    "dispatched_process": child_result["process_name"],
+                },
+            })
+            instance.current_state = target.immediate
+            instance.history.append(auto_entry)
+            self._store.save(instance)
+
+            self._store.append_log(
+                f"DISPATCH {instance.process_name}-{instance.instance_id}: "
+                f"created {child_result['process_name']}-"
+                f"{child_result['instance_id']}, "
+                f"continued to {target.immediate}"
+            )
+
+            return TransitionResult(
+                success=True,
+                new_state=target.immediate,
+                validation_results=[_vr_to_dict(r) for r in all_results],
+                available_transitions=immediate_state.transitions,
+                role=immediate_state.role,
+                agent_context=immediate_state.agent_context.model_dump() if immediate_state.agent_context else None,
+                message=(
+                    f"Dispatched '{target.process}' as instance "
+                    f"{child_result['instance_id']}, "
+                    f"continued to '{target.immediate}'"
+                ),
+                subprocess_started=child_result["instance_id"],
+            )
+
         # Handle wait states
         if target.type == StateType.wait:
             instance.waiting = True
@@ -614,6 +663,55 @@ class Engine:
             f"SUBPROCESS {parent.process_name}-{parent.instance_id}: "
             f"started {child_defn.name}-{child_instance.instance_id} "
             f"at state '{state.id}'"
+        )
+
+        return {
+            "instance_id": child_instance.instance_id,
+            "process_name": child_instance.process_name,
+            "current_state": child_instance.current_state,
+            "available_transitions": initial.transitions,
+        }
+
+    def _dispatch_child(
+        self, parent: ProcessInstance, state: ProcessState
+    ) -> dict[str, Any]:
+        """Start a child process without suspending the parent (async dispatch)."""
+        child_params: dict[str, str] = {}
+        if state.parameter_map:
+            for child_key, template in state.parameter_map.items():
+                child_params[child_key] = substitute_params(
+                    template, parent.parameters
+                )
+
+        child_defn, child_hash = self._get_definition(state.process)
+        for p in child_defn.parameters:
+            if p.required and p.name not in child_params:
+                raise SubprocessError(
+                    f"Dispatch process '{state.process}' requires parameter "
+                    f"'{p.name}' but it is not in parameter_map"
+                )
+            if p.name not in child_params and p.default is not None:
+                child_params[p.name] = p.default
+
+        initial = child_defn.initial_state()
+        child_instance = self._store.create(
+            process_name=child_defn.name,
+            initial_state=initial.id,
+            version=child_defn.version,
+            definition_hash=child_hash,
+            parameters=child_params,
+        )
+
+        # Link child to parent (but don't suspend parent)
+        child_instance.parent_instance_id = parent.instance_id
+        child_instance.parent_state_id = state.id
+        if state.assign_to:
+            child_instance.started_by = state.assign_to
+        self._store.save(child_instance)
+
+        self._store.append_log(
+            f"DISPATCH {parent.process_name}-{parent.instance_id}: "
+            f"created {child_defn.name}-{child_instance.instance_id}"
         )
 
         return {
