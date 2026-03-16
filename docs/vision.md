@@ -18,8 +18,10 @@ The product is not the state machine. The state machine is plumbing. The product
 
 1. **The definition format** — codified professional workflows, shareable and version-controlled
 2. **The gate system** — validation that checks reality, not self-reports
-3. **The enforcement layer** — a trust spectrum from observation to hard enforcement
-4. **The interface contract** — a stable surface that any agent runtime can integrate with
+3. **The role system** — agent context that provisions a general-purpose agent as a specialist on state entry
+4. **The signal system** — wait states that block until external input arrives, enabling human-in-the-loop and cross-agent handoff
+5. **The enforcement layer** — a trust spectrum from observation to hard enforcement
+6. **The interface contract** — a stable surface that any agent runtime can integrate with
 
 ## What Turnstile is not
 
@@ -44,9 +46,11 @@ Subprocess delegation, definition inheritance, registry resolution. Processes ca
 *Status: complete.*
 
 ### Layer 2: Multi-actor awareness
-Human-in-the-loop gates. Role-based state permissions. Handoff between agents (or between agents and humans). Processes that model collaboration, not just solo execution.
+Role-based state provisioning. Wait states with signal delivery for human-in-the-loop gates. Agent context that specializes a general-purpose agent for each state. Handoff between agents (or between agents and humans). Processes that model collaboration, not just solo execution.
 
-*Status: next horizon.*
+The operational model is a construction site: process instances are equipment (persistent, stateful), sessions are operators (ephemeral, interchangeable), and roles are qualifications (provisioned on entry, not credentialed). See [`docs/spikes/multi-actor-conops.md`](spikes/multi-actor-conops.md) for the full concept of operations.
+
+*Status: primitives complete. Async dispatch and main process pattern remain.*
 
 ### Layer 3: Organizational process fabric
 Cross-project analytics. Definition marketplace. Compliance audit trails. Process definitions as organizational knowledge assets that improve over time through data.
