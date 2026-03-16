@@ -415,6 +415,7 @@ def schema(ctx: click.Context, output: str | None) -> None:
     is_flag=True,
     help="Also search active (in-progress) instances.",
 )
+@click.option("--parent", default=None, help="Filter by parent instance ID (for dispatched children).")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 @click.pass_context
 def check_completed(
@@ -423,6 +424,7 @@ def check_completed(
     state: str | None,
     parameters: tuple[str, ...],
     include_active: bool,
+    parent: str | None,
     as_json: bool,
 ) -> None:
     """Check that a process instance was completed (for CI/hooks).
@@ -434,6 +436,8 @@ def check_completed(
       turnstile check-completed feature-deploy --state merge
 
       turnstile check-completed feature-deploy -P branch_name=main -s review_ready
+
+      turnstile check-completed feature-development --parent abc123
     """
     engine = _get_engine(ctx.obj["project"])
 
@@ -451,6 +455,7 @@ def check_completed(
         state=state,
         parameters=param_dict or None,
         include_active=include_active,
+        parent_instance_id=parent,
     )
 
     if as_json:
