@@ -57,6 +57,8 @@ class TransitionResult:
     message: str = ""
     # Role declared on the target state
     role: str = ""
+    # Agent context for the target state (provisioning)
+    agent_context: dict[str, Any] | None = None
     # Subprocess delegation info
     subprocess_started: str | None = None  # child instance_id if subprocess started
     parent_resumed: bool = False
@@ -512,6 +514,7 @@ class Engine:
             validation_results=[_vr_to_dict(r) for r in all_results],
             available_transitions=target.transitions,
             role=target.role,
+            agent_context=target.agent_context.model_dump() if target.agent_context else None,
             skill_directives=[
                 {"skill": sd.skill, "args": sd.args}
                 for sd in target.skill_directives

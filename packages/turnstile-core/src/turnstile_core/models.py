@@ -184,6 +184,19 @@ class RequiredMetadata(BaseModel):
     description: str = ""
 
 
+class AgentContext(BaseModel):
+    """Configuration for specializing an agent when entering a state.
+
+    Surfaced in MCP responses so the agent runtime can configure itself.
+    The engine does not enforce these; they are advisory. The process
+    definition carries the expertise; the agent absorbs it on entry.
+    """
+
+    guidance: str = ""
+    reference_files: list[str] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=list)
+
+
 class StatePermissions(BaseModel):
     """Permissions governing what actions are allowed in a state.
 
@@ -207,6 +220,7 @@ class ProcessState(BaseModel):
     description: str = ""
     type: StateType = StateType.normal
     role: str = ""
+    agent_context: AgentContext | None = None
     transitions: list[str] = Field(default_factory=list)
     on_enter: StateHooks | None = None
     on_exit: StateHooks | None = None
