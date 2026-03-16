@@ -370,6 +370,7 @@ async def process_check_completed(
     state: str | None = None,
     parameters: dict[str, str] | None = None,
     include_active: bool = False,
+    parent: str | None = None,
 ) -> dict[str, Any]:
     """Check whether a completed process instance matches criteria.
 
@@ -381,9 +382,13 @@ async def process_check_completed(
         state: Optional state that must have been reached (in history).
         parameters: Optional parameter key-value filters.
         include_active: Also search active (in-progress) instances.
+        parent: Optional parent instance ID filter (for dispatched children).
     """
     engine = _get_engine()
-    return engine.check_completed(name, state, parameters, include_active)
+    return engine.check_completed(
+        name, state, parameters, include_active,
+        parent_instance_id=parent,
+    )
 
 
 def main():

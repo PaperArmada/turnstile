@@ -1106,6 +1106,7 @@ class Engine:
         state: str | None = None,
         parameters: dict[str, str] | None = None,
         include_active: bool = False,
+        parent_instance_id: str | None = None,
     ) -> dict[str, Any]:
         """Check whether a matching process instance exists and reached a state.
 
@@ -1123,6 +1124,13 @@ class Engine:
 
         # Filter by process name
         matches = [c for c in candidates if c.process_name == process_name]
+
+        # Filter by parent instance
+        if parent_instance_id:
+            matches = [
+                m for m in matches
+                if m.parent_instance_id == parent_instance_id
+            ]
 
         # Filter by parameters
         if parameters:
