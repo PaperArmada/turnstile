@@ -482,7 +482,12 @@ class Engine:
 
         # Handle dispatch states (async subprocess: create child, don't suspend)
         if target.type == StateType.dispatch:
-            child_result = self._dispatch_child(instance, target)
+            # Extract string values from metadata for parameter forwarding
+            extra_params = {
+                k: str(v) for k, v in (metadata or {}).items()
+                if isinstance(v, (str, int, float, bool))
+            }
+            child_result = self._dispatch_child(instance, target, extra_params=extra_params)
             immediate_state = defn.get_state(target.immediate)
             if immediate_state is None:
                 raise TransitionError(
@@ -673,14 +678,25 @@ class Engine:
         }
 
     def _dispatch_child(
-        self, parent: ProcessInstance, state: ProcessState
+        self, parent: ProcessInstance, state: ProcessState,
+        extra_params: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        """Start a child process without suspending the parent (async dispatch)."""
+        """Start a child process without suspending the parent (async dispatch).
+
+        extra_params: additional key-value pairs (typically from transition
+        metadata) merged with parent parameters for parameter_map resolution.
+        Extra params take precedence over parent params.
+        """
+        # Merge parent parameters with extra params from transition metadata
+        param_context = dict(parent.parameters)
+        if extra_params:
+            param_context.update(extra_params)
+
         child_params: dict[str, str] = {}
         if state.parameter_map:
             for child_key, template in state.parameter_map.items():
                 child_params[child_key] = substitute_params(
-                    template, parent.parameters
+                    template, param_context
                 )
 
         child_defn, child_hash = self._get_definition(state.process)
