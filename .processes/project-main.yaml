@@ -39,6 +39,18 @@ states:
           expect: not_empty
           message: "Active process instances"
           severity: info
+        - command: "turnstile check-completed feature-development --parent ${instance_id} --include-active --json 2>/dev/null | head -1 || echo '{}'"
+          expect: not_empty
+          message: "Dispatched feature work status"
+          severity: info
+        - command: "turnstile check-completed bug-fix --parent ${instance_id} --include-active --json 2>/dev/null | head -1 || echo '{}'"
+          expect: not_empty
+          message: "Dispatched bug fix status"
+          severity: info
+        - command: "turnstile check-completed spike --parent ${instance_id} --include-active --json 2>/dev/null | head -1 || echo '{}'"
+          expect: not_empty
+          message: "Dispatched spike status"
+          severity: info
 
   - id: triage
     role: coordinator
