@@ -183,6 +183,32 @@ async def process_skip(
 
 
 @mcp.tool()
+async def process_signal(
+    instance_id: str, signal_name: str,
+    data: dict[str, Any],
+    target_state: str | None = None,
+) -> dict[str, Any]:
+    """Deliver a signal to a waiting process instance.
+
+    Wait states block until an external signal arrives. This tool
+    delivers the signal, validates required fields, and optionally
+    transitions the instance to a target state in one step.
+
+    Args:
+        instance_id: The ID of the waiting process instance.
+        signal_name: Must match the wait state's expected signal name.
+        data: Signal payload (key-value pairs matching required_fields).
+        target_state: Optional state to transition to immediately.
+                      Must be in the wait state's transitions list.
+    """
+    engine = _get_engine()
+    return engine.receive_signal(
+        instance_id, signal_name, data,
+        target_state=target_state, session_id=_session_id,
+    )
+
+
+@mcp.tool()
 async def process_abandon(
     instance_id: str, reason: str
 ) -> dict[str, Any]:
