@@ -21,6 +21,7 @@ class StateType(str, Enum):
     normal = "normal"
     subprocess = "subprocess"
     wait = "wait"
+    dispatch = "dispatch"
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +253,10 @@ class ProcessState(BaseModel):
     # Wait-specific fields
     signal: SignalSpec | None = None
 
+    # Dispatch-specific fields
+    immediate: str | None = None
+    assign_to: str | None = None
+
     @model_validator(mode="after")
     def _check_subprocess_fields(self) -> ProcessState:
         if self.type == StateType.subprocess:
@@ -292,6 +297,30 @@ class ProcessState(BaseModel):
             if self.signal is not None:
                 raise ValueError(
                     f"Non-wait state '{self.id}' must not have 'signal'"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _check_dispatch_fields(self) -> ProcessState:
+        if self.type == StateType.dispatch:
+            if not self.process:
+                raise ValueError(
+                    f"Dispatch state '{self.id}' must have 'process' field"
+                )
+            if not self.immediate:
+                raise ValueError(
+                    f"Dispatch state '{self.id}' must have 'immediate' field "
+                    f"(target state after dispatch)"
+                )
+            if self.transitions:
+                raise ValueError(
+                    f"Dispatch state '{self.id}' must not have 'transitions' "
+                    f"(uses 'immediate' instead)"
+                )
+        else:
+            if self.immediate is not None:
+                raise ValueError(
+                    f"Non-dispatch state '{self.id}' must not have 'immediate'"
                 )
         return self
 
