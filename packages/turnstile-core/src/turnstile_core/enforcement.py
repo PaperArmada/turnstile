@@ -33,6 +33,10 @@ class EnforcementContext:
     available_transitions: list[str]
     permissions: StatePermissions
     suspended: bool = False
+    waiting: bool = False
+    waiting_for_signal: str = ""
+    role: str = ""
+    agent_context_summary: str = ""
     staleness_hint: str = ""
 
 
@@ -62,6 +66,8 @@ def _build_context(
     state_desc = ""
     transitions: list[str] = []
     permissions = StatePermissions()  # default: permissive
+    role = ""
+    agent_context_summary = ""
 
     if defn:
         state_map = {s.id: s for s in defn.states}
@@ -70,6 +76,33 @@ def _build_context(
             state_desc = state_obj.description
             transitions = state_obj.transitions
             permissions = state_obj.permissions
+            role = state_obj.role
+            if state_obj.agent_context:
+                parts = []
+                if state_obj.agent_context.guidance:
+                    # Compact: first 3 lines of guidance
+                    guide_lines = state_obj.agent_context.guidance.strip().splitlines()
+                    parts.extend(guide_lines[:3])
+                    if len(guide_lines) > 3:
+                        parts.append("...")
+                if state_obj.agent_context.reference_files:
+                    parts.append(
+                        "Reference: "
+                        + ", ".join(state_obj.agent_context.reference_files)
+                    )
+                if state_obj.agent_context.tools:
+                    parts.append(
+                        "Tools: "
+                        + ", ".join(state_obj.agent_context.tools)
+                    )
+                agent_context_summary = "\n".join(parts)
+
+    waiting_for = ""
+    if instance.waiting and defn:
+        state_map = {s.id: s for s in defn.states}
+        state_obj = state_map.get(instance.current_state)
+        if state_obj and state_obj.signal:
+            waiting_for = state_obj.signal.name
 
     return EnforcementContext(
         instance_id=instance.instance_id,
@@ -79,6 +112,10 @@ def _build_context(
         available_transitions=transitions,
         permissions=permissions,
         suspended=instance.suspended,
+        waiting=instance.waiting,
+        waiting_for_signal=waiting_for,
+        role=role,
+        agent_context_summary=agent_context_summary,
         staleness_hint=_staleness_hint(instance.updated_at),
     )
 
@@ -125,8 +162,19 @@ def _format_guidance(contexts: list[EnforcementContext], action: str) -> str:
             lines.append(
                 f"  Next: {', '.join(ctx.available_transitions)}"
             )
+        if ctx.role:
+            lines.append(f"  Role: {ctx.role}")
         if ctx.staleness_hint:
             lines.append(ctx.staleness_hint)
+
+    waiting = [c for c in contexts if c.waiting]
+    if waiting:
+        for ctx in waiting:
+            lines.append(
+                f"Waiting: {ctx.process_name} @ {ctx.current_state} "
+                f"(instance {ctx.instance_id}, waiting for signal "
+                f"'{ctx.waiting_for_signal}')"
+            )
 
     if suspended:
         for ctx in suspended:
