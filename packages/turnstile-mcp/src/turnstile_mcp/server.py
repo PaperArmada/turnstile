@@ -141,6 +141,8 @@ async def process_transition(
     }
     if result.role:
         response["role"] = result.role
+    if result.agent_context:
+        response["agent_context"] = result.agent_context
     if result.subprocess_started:
         response["subprocess_started"] = result.subprocess_started
     if result.parent_resumed:
