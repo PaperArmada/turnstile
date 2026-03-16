@@ -1,0 +1,87 @@
+name: scientific-method
+description: "Structured investigation using the scientific method: observe, hypothesize, test, conclude"
+version: "1.0.0"
+
+metadata:
+  author: "turnstile"
+  tags: ["general-purpose", "investigation"]
+  principles:
+    - render-dont-record
+    - portable-by-default
+    - single-process-single-document
+
+parameters:
+  - name: observation
+    description: "The initial observation or phenomenon prompting investigation"
+    required: true
+  - name: output_file
+    description: "Path to write findings (e.g., docs/investigations/topic.md)"
+    required: false
+    default: "none"
+  - name: domain
+    description: "Domain context for the investigation (e.g., 'codebase', 'market research', 'compliance')"
+    required: false
+    default: "general"
+
+states:
+  - id: start
+    type: initial
+    transitions: [observe]
+
+  - id: observe
+    description: "Gather and document observations about the phenomenon. What do you see? What data is available? What are the relevant conditions?"
+    transitions: [question, abandoned]
+    on_enter:
+      validate:
+        - command: "echo 'Domain: ${domain}'"
+          expect: not_empty
+          message: "Investigation domain context"
+          severity: info
+
+  - id: question
+    description: "Formulate a specific, testable question from the observations. A good question is narrow, measurable, and answerable with available methods."
+    transitions: [hypothesize, observe, abandoned]
+
+  - id: hypothesize
+    description: "Propose a testable explanation that answers the question. State it as a prediction: if the hypothesis is true, then [expected outcome] when [test condition]."
+    transitions: [experiment, question]
+    on_exit:
+      validate:
+        - command: "test '${output_file}' = 'none' && echo skip || (grep -qi 'hypothes' '${output_file}' 2>/dev/null && echo found || echo missing)"
+          expect: not_equals("missing")
+          message: "Hypothesis should be documented before testing"
+          severity: warning
+
+  - id: experiment
+    description: "Design and execute a test of the hypothesis. Define what you will measure, how you will measure it, and what results would support or refute the hypothesis."
+    transitions: [analyze, hypothesize]
+
+  - id: analyze
+    description: "Examine the results of the experiment. Do they support, refute, or fail to resolve the hypothesis? Are there confounding factors or alternative explanations?"
+    transitions: [conclude, hypothesize, experiment]
+
+  - id: conclude
+    description: "Draw conclusions. Summarize findings, state whether the hypothesis was supported or refuted, identify limitations, and propose follow-up questions."
+    transitions: [supported, refuted, inconclusive]
+    on_exit:
+      validate:
+        - command: "test '${output_file}' = 'none' && echo skip || (test -f '${output_file}' && echo exists || echo missing)"
+          expect: not_equals("missing")
+          message: "Output file must exist if one was specified"
+          severity: warning
+
+  - id: supported
+    type: terminal
+    description: "Hypothesis supported by evidence. Findings documented."
+
+  - id: refuted
+    type: terminal
+    description: "Hypothesis refuted by evidence. Findings documented."
+
+  - id: inconclusive
+    type: terminal
+    description: "Results inconclusive. May need refined hypothesis, better experiment design, or more data."
+
+  - id: abandoned
+    type: terminal
+    description: "Investigation abandoned (question answered elsewhere, not worth pursuing, or blocked)"
