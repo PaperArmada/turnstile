@@ -67,6 +67,32 @@ Run proposed features through these questions:
 
 5. **Trust-building or capability-building?** Does this help someone trust an agent more, or does it make the agent more capable? Turnstile's job is trust. Capability is someone else's problem.
 
+## Consistency and auditability
+
+Turnstile guarantees **structural consistency**, not **behavioral consistency**.
+
+**Structural consistency** means the agent followed the right steps, in the right order, and passed the right checks. States, transitions, validation gates. These are deterministic, auditable, and environment-independent. A process definition produces the same structure whether it runs in a healthcare project or a fintech project.
+
+**Behavioral consistency** means the agent made the same judgment calls within each state. This is neither achievable nor desirable with LLM agents. The agent's behavior within a state is influenced by the full context stack: project CLAUDE.md, system prompt, memory files, model version, conversation history. A legal reviewer in healthcare *should* behave differently than one in fintech, even following the same review process.
+
+The auditability boundary is the **validation gate**. Gates are deterministic. They check outputs, not reasoning. "Does the document contain a PII section?" doesn't depend on the system prompt. "Did tests pass?" doesn't depend on CLAUDE.md. Render-don't-record ensures gates verify what's true right now, regardless of how the agent got there.
+
+**What Turnstile can audit:**
+- Process structure was followed (states, transitions, timing)
+- Gates passed (mechanical verification of outputs)
+- Role context that was provided (agent_context, version-controlled via role spec files)
+- Human involvement at wait states (who signaled, what they approved)
+
+**What the version control system can audit:**
+- The full context stack at any point in time (CLAUDE.md, role specs, process definitions)
+
+**What Turnstile does not audit:**
+- Agent reasoning within a state (lives in the conversation transcript, outside scope)
+
+For domains requiring tighter behavioral consistency (compliance, regulatory), the process author writes more specific gates and richer role specs. More gates = more checkpoints = more auditability. The process definition controls how tight the constraints are.
+
+Role context (agent_context) is **additive**, not replacement. It layers on top of the project's existing configuration without modifying it. Turnstile never writes to or overwrites a consumer's CLAUDE.md, system prompt, or memory files. The consumer's environment is theirs; Turnstile adds process awareness on top of it.
+
 ## Principles
 
 The design principles in [`docs/principles/`](principles/) govern how Turnstile is built. The decision filter above governs what gets built. Both inform every contribution.
