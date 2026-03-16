@@ -55,6 +55,8 @@ class TransitionResult:
     validation_results: list[dict[str, Any]] = field(default_factory=list)
     available_transitions: list[str] = field(default_factory=list)
     message: str = ""
+    # Role declared on the target state
+    role: str = ""
     # Subprocess delegation info
     subprocess_started: str | None = None  # child instance_id if subprocess started
     parent_resumed: bool = False
@@ -325,6 +327,7 @@ class Engine:
     async def transition(
         self, instance_id: str, target_state: str,
         metadata: dict[str, Any] | None = None,
+        session_id: str = "",
     ) -> TransitionResult:
         """Attempt a legal transition to a new state."""
         instance = self._store.load(instance_id)
@@ -444,6 +447,8 @@ class Engine:
             "from": instance.current_state,
             "to": target_state,
             "at": _now_iso(),
+            "role": target.role,
+            "session_id": session_id,
             "validations": [_vr_to_dict(r) for r in all_results],
             "metadata": metadata or {},
         })
@@ -506,6 +511,7 @@ class Engine:
             new_state=target_state,
             validation_results=[_vr_to_dict(r) for r in all_results],
             available_transitions=target.transitions,
+            role=target.role,
             skill_directives=[
                 {"skill": sd.skill, "args": sd.args}
                 for sd in target.skill_directives
@@ -632,7 +638,8 @@ class Engine:
         }
 
     async def skip(
-        self, instance_id: str, target_state: str, reason: str
+        self, instance_id: str, target_state: str, reason: str,
+        session_id: str = "",
     ) -> TransitionResult:
         """Force-skip to a state, bypassing transition rules."""
         if self.registry.settings.require_override_reason and not reason:
@@ -659,6 +666,8 @@ class Engine:
             "to": target_state,
             "at": _now_iso(),
             "triggered_by": f"skip: {reason}",
+            "role": target.role,
+            "session_id": session_id,
             "validations": [],
         })
 
@@ -690,6 +699,7 @@ class Engine:
             new_state=target_state,
             validation_results=[],
             available_transitions=target.transitions,
+            role=target.role,
             message=f"Override logged: {reason}",
         )
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,11 @@ from turnstile_core.engine import Engine
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Session-scoped identifier: generated once when the MCP server starts,
+# shared by all tool calls within this session. Used for correlating
+# transitions made in the same conversation and for concurrency detection.
+_session_id: str = uuid.uuid4().hex[:12]
 
 mcp = FastMCP("turnstile")
 
@@ -123,7 +129,9 @@ async def process_transition(
                   Stored in history for analytics and audit.
     """
     engine = _get_engine()
-    result = await engine.transition(instance_id, target_state, metadata=metadata)
+    result = await engine.transition(
+        instance_id, target_state, metadata=metadata, session_id=_session_id,
+    )
     response: dict[str, Any] = {
         "success": result.success,
         "new_state": result.new_state,
@@ -131,6 +139,8 @@ async def process_transition(
         "available_transitions": result.available_transitions,
         "message": result.message,
     }
+    if result.role:
+        response["role"] = result.role
     if result.subprocess_started:
         response["subprocess_started"] = result.subprocess_started
     if result.parent_resumed:
@@ -161,7 +171,7 @@ async def process_skip(
         reason: Why this override is necessary (logged for audit).
     """
     engine = _get_engine()
-    result = await engine.skip(instance_id, target_state, reason)
+    result = await engine.skip(instance_id, target_state, reason, session_id=_session_id)
     return {
         "success": result.success,
         "new_state": result.new_state,

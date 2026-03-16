@@ -206,6 +206,7 @@ class ProcessState(BaseModel):
     id: str
     description: str = ""
     type: StateType = StateType.normal
+    role: str = ""
     transitions: list[str] = Field(default_factory=list)
     on_enter: StateHooks | None = None
     on_exit: StateHooks | None = None
