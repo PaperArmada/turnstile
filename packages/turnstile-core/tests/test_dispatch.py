@@ -258,3 +258,111 @@ class TestDispatchTransition:
             assert c2.status == "active"
         finally:
             loop.close()
+
+
+# ---------------------------------------------------------------------------
+# Parameter forwarding from transition metadata
+# ---------------------------------------------------------------------------
+
+
+DYNAMIC_PARENT = {
+    "name": "dynamic-coordinator",
+    "description": "Coordinator that forwards metadata as child parameters",
+    "version": "1.0.0",
+    "parameters": [
+        {"name": "project_name", "description": "Project name"},
+    ],
+    "states": [
+        {"id": "start", "type": "initial", "transitions": ["triage"]},
+        {"id": "triage", "transitions": ["dispatch_work"]},
+        {
+            "id": "dispatch_work",
+            "type": "dispatch",
+            "process": "child-task",
+            "parameter_map": {"task_name": "${task_name}"},
+            "immediate": "ready",
+        },
+        {"id": "ready", "transitions": ["triage", "shutdown"]},
+        {"id": "shutdown", "type": "terminal"},
+    ],
+}
+
+
+@pytest.fixture
+def dynamic_engine(tmp_path):
+    """Engine where parent does NOT declare task_name as a parameter."""
+    proc_dir = tmp_path / ".processes"
+    proc_dir.mkdir()
+    (proc_dir / "dynamic-coordinator.yaml").write_text(yaml.dump(DYNAMIC_PARENT))
+    (proc_dir / "child-task.yaml").write_text(yaml.dump(CHILD_PROCESS))
+    return Engine(tmp_path)
+
+
+class TestParameterForwarding:
+    def test_metadata_provides_child_params(self, dynamic_engine):
+        """Parent doesn't have task_name, but metadata does."""
+        import asyncio
+        loop = asyncio.new_event_loop()
+        try:
+            result = dynamic_engine.start(
+                "dynamic-coordinator", {"project_name": "test-project"}
+            )
+            pid = result["instance_id"]
+
+            loop.run_until_complete(dynamic_engine.transition(pid, "triage"))
+            r = loop.run_until_complete(
+                dynamic_engine.transition(
+                    pid, "dispatch_work",
+                    metadata={"task_name": "implement auth"},
+                )
+            )
+
+            assert r.success
+            child_id = r.subprocess_started
+            child = dynamic_engine._store.load(child_id)
+            assert child.parameters["task_name"] == "implement auth"
+        finally:
+            loop.close()
+
+    def test_metadata_overrides_parent_params(self, engine):
+        """Metadata values take precedence over parent parameters."""
+        import asyncio
+        loop = asyncio.new_event_loop()
+        try:
+            result = engine.start("coordinator", {"task_name": "original"})
+            pid = result["instance_id"]
+
+            loop.run_until_complete(engine.transition(pid, "triage"))
+            r = loop.run_until_complete(
+                engine.transition(
+                    pid, "dispatch_work",
+                    metadata={"task_name": "overridden"},
+                )
+            )
+
+            child_id = r.subprocess_started
+            child = engine._store.load(child_id)
+            assert child.parameters["task_name"] == "overridden"
+        finally:
+            loop.close()
+
+    def test_missing_param_without_metadata_passes_literal(self, dynamic_engine):
+        """Without metadata, unresolved ${var} passes through as literal string."""
+        import asyncio
+        loop = asyncio.new_event_loop()
+        try:
+            result = dynamic_engine.start(
+                "dynamic-coordinator", {"project_name": "test-project"}
+            )
+            pid = result["instance_id"]
+
+            loop.run_until_complete(dynamic_engine.transition(pid, "triage"))
+            r = loop.run_until_complete(
+                dynamic_engine.transition(pid, "dispatch_work")
+            )
+
+            # Child gets the unresolved template as a literal
+            child = dynamic_engine._store.load(r.subprocess_started)
+            assert child.parameters["task_name"] == "${task_name}"
+        finally:
+            loop.close()
