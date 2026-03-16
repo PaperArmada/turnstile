@@ -82,6 +82,12 @@ def _apply_state_patch(state: ProcessState, patch: StatePatch) -> None:
     if patch.description is not None:
         state.description = patch.description
 
+    if patch.role is not None:
+        state.role = patch.role
+
+    if patch.agent_context is not None:
+        state.agent_context = patch.agent_context
+
     if patch.on_enter is not None:
         state.on_enter = _apply_hooks_patch(state.on_enter, patch.on_enter)
 

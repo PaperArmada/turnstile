@@ -469,6 +469,8 @@ class StatePatch(BaseModel):
     id: str
     transitions: list[str] | None = None
     description: str | None = None
+    role: str | None = None
+    agent_context: AgentContext | None = None
     on_enter: StateHooksPatch | None = None
     on_exit: StateHooksPatch | None = None
     metadata: dict[str, Any] | None = None

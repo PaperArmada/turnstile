@@ -1,0 +1,45 @@
+extends: peer-review
+name: security-review
+description: "Security-focused peer review with OWASP and threat modeling guidance"
+version: "1.0.0"
+
+overrides:
+  patch_states:
+    - id: prepare
+      agent_context:
+        guidance: |
+          You are preparing an artifact for security review.
+          Ensure the artifact includes: architecture diagrams, data flow,
+          authentication/authorization boundaries, and any external dependencies.
+          Document known security assumptions and trust boundaries.
+        reference_files:
+          - docs/security/threat-model.md
+          - docs/security/checklist.md
+
+    - id: awaiting_review
+      role: security_reviewer
+      agent_context:
+        guidance: |
+          You are conducting a security review.
+          Evaluate against OWASP Top 10, focusing on:
+          - Injection vulnerabilities (SQL, command, XSS)
+          - Authentication and session management
+          - Access control and authorization
+          - Data exposure and encryption
+          - Input validation and output encoding
+          - Dependency vulnerabilities
+          Flag findings by severity: critical, high, medium, low.
+        reference_files:
+          - docs/security/threat-model.md
+          - docs/security/checklist.md
+        tools:
+          - web_search
+          - grep
+
+    - id: revise
+      agent_context:
+        guidance: |
+          The security reviewer has identified findings.
+          Address each finding by severity, starting with critical.
+          For each finding: fix the vulnerability, add a test or
+          validation that prevents regression, and document the fix.
