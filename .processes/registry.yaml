@@ -11,6 +11,7 @@ local:
 - scientific-method
 - decision-record
 - peer-review
+- project-main
 settings:
   state_dir: .process-state
   require_override_reason: true

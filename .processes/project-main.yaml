@@ -1,0 +1,147 @@
+name: project-main
+description: "Persistent project coordinator: triage, dispatch, review, govern"
+version: "1.0.0"
+
+metadata:
+  author: "turnstile"
+  tags: ["general-purpose", "coordination"]
+  principles:
+    - render-dont-record
+    - portable-by-default
+    - progressive-disclosure
+
+parameters:
+  - name: project_name
+    description: "Name of the project being coordinated"
+    required: true
+  - name: test_command
+    description: "Command to run the project test suite"
+    required: false
+    default: "echo 'no test command configured'"
+
+states:
+  - id: start
+    type: initial
+    transitions: [ready]
+
+  - id: ready
+    role: coordinator
+    description: "Awaiting work. Check for completed dispatches, then triage new work or shut down."
+    agent_context:
+      guidance: |
+        You are the project coordinator. Check for completed dispatched work
+        first, then ask the operator what to work on next.
+        If there is nothing to do, you may stay here until directed.
+    transitions: [triage, review_completed, shutdown]
+    on_enter:
+      validate:
+        - command: "ls .process-state/active/*.json 2>/dev/null | wc -l | tr -d ' '"
+          expect: not_empty
+          message: "Active process instances"
+          severity: info
+
+  - id: triage
+    role: coordinator
+    description: "Classify incoming work and route to the appropriate path."
+    agent_context:
+      guidance: |
+        Classify the work. Options:
+        - Feature or improvement: dispatch_feature
+        - Bug fix: dispatch_bugfix
+        - Investigation or research: dispatch_spike
+        - New process definition needed: propose_process
+        - Nothing to do right now: back to ready
+    transitions:
+      - dispatch_feature
+      - dispatch_bugfix
+      - dispatch_spike
+      - propose_process
+      - ready
+
+  # --- Dispatch states (fire-and-forget) ---
+
+  - id: dispatch_feature
+    type: dispatch
+    process: feature-development
+    parameter_map:
+      feature_name: "${feature_name}"
+      test_command: "${test_command}"
+    immediate: ready
+    assign_to: developer
+
+  - id: dispatch_bugfix
+    type: dispatch
+    process: bug-fix
+    parameter_map:
+      bug_summary: "${bug_summary}"
+      test_command: "${test_command}"
+    immediate: ready
+    assign_to: developer
+
+  - id: dispatch_spike
+    type: dispatch
+    process: spike
+    parameter_map:
+      question: "${question}"
+    immediate: ready
+    assign_to: investigator
+
+  # --- Process creation governance ---
+
+  - id: propose_process
+    role: coordinator
+    description: "Prepare a proposal for a new process definition. Document the name, purpose, and justification for why this workflow should be codified."
+    agent_context:
+      guidance: |
+        Document the proposed process:
+        - Name: what will it be called?
+        - Purpose: what workflow does it codify?
+        - Justification: why does this need to be a process?
+        Submit for owner approval when ready.
+    transitions: [approval_gate, ready]
+
+  - id: approval_gate
+    type: wait
+    role: owner
+    description: "Owner reviews the process creation proposal. Approve to proceed, reject to return to ready."
+    agent_context:
+      guidance: |
+        A new process definition has been proposed.
+        Review the name, purpose, and justification.
+        Approve if this workflow should be codified.
+        Reject if premature, redundant, or unnecessary.
+    signal:
+      name: process_approval
+      required_fields:
+        - key: approved
+          description: "true or false"
+        - key: reason
+          description: "Rationale for the decision"
+    transitions: [dispatch_create_process, ready]
+
+  - id: dispatch_create_process
+    type: dispatch
+    process: create-process
+    parameter_map:
+      name: "${process_name}"
+      purpose: "${process_purpose}"
+    immediate: ready
+    assign_to: process_author
+
+  # --- Review completed work ---
+
+  - id: review_completed
+    role: coordinator
+    description: "Review dispatched work that has completed. Check outcomes, verify quality, close out or request rework."
+    agent_context:
+      guidance: |
+        Check completed dispatched instances.
+        For each: review the outcome, verify the work product,
+        and decide if follow-up is needed.
+    transitions: [ready]
+
+  # --- Terminal ---
+
+  - id: shutdown
+    type: terminal
+    description: "Project coordination ended."
