@@ -284,7 +284,10 @@ class Engine:
                 "instance_id": instance.instance_id,
                 "process_name": instance.process_name,
                 "current_state": instance.current_state,
-                "available_transitions": state.transitions if state else [],
+                "available_transitions": (
+                    [] if instance.suspended or instance.waiting
+                    else (state.transitions if state else [])
+                ),
                 "started_at": instance.started_at,
                 "updated_at": instance.updated_at,
                 "parameters": instance.parameters,
@@ -298,6 +301,10 @@ class Engine:
                 ]
             if instance.suspended:
                 info["child_instance_id"] = instance.child_instance_id
+            if instance.waiting:
+                info["waiting"] = True
+                if state and state.signal:
+                    info["waiting_for_signal"] = state.signal.name
             if instance.parent_instance_id:
                 info["parent_instance_id"] = instance.parent_instance_id
             return info
@@ -340,6 +347,13 @@ class Engine:
                 f"Instance is suspended waiting for subprocess "
                 f"'{instance.child_instance_id}'. Complete or abandon "
                 f"the child process first."
+            )
+
+        # Block transitions on waiting instances (use receive_signal instead)
+        if instance.waiting:
+            raise TransitionError(
+                f"Instance is waiting for a signal. Use receive_signal() "
+                f"to deliver the signal and advance the state."
             )
 
         defn, _ = self._get_definition(instance.process_name)
@@ -465,6 +479,27 @@ class Engine:
                     await run_command(cmd, self.project_root, timeout=60)
                 except Exception:
                     pass  # Actions are best-effort
+
+        # Handle wait states
+        if target.type == StateType.wait:
+            instance.waiting = True
+            self._store.save(instance)
+
+            self._store.append_log(
+                f"TRANSITION {instance.process_name}-{instance.instance_id}: "
+                f"{history_entry.from_state} -> {target_state} (waiting for signal "
+                f"'{target.signal.name}')"
+            )
+
+            return TransitionResult(
+                success=True,
+                new_state=target_state,
+                validation_results=[_vr_to_dict(r) for r in all_results],
+                available_transitions=[],
+                role=target.role,
+                agent_context=target.agent_context.model_dump() if target.agent_context else None,
+                message=f"Waiting for signal '{target.signal.name}'",
+            )
 
         # Handle subprocess states
         if target.type == StateType.subprocess:
@@ -705,6 +740,114 @@ class Engine:
             role=target.role,
             message=f"Override logged: {reason}",
         )
+
+    def receive_signal(
+        self, instance_id: str, signal_name: str,
+        data: dict[str, Any],
+        target_state: str | None = None,
+        session_id: str = "",
+    ) -> dict[str, Any]:
+        """Deliver a signal to a waiting process instance.
+
+        Validates the signal name and required fields, stores the signal
+        data, and optionally transitions to a target state.
+
+        Args:
+            instance_id: The ID of the waiting process instance.
+            signal_name: Must match the wait state's signal spec name.
+            data: Signal payload (key-value pairs).
+            target_state: Optional target to transition to immediately.
+            session_id: Session identifier for audit trail.
+        """
+        instance = self._store.load(instance_id)
+
+        if not instance.waiting:
+            raise TransitionError(
+                f"Instance '{instance_id}' is not waiting for a signal"
+            )
+
+        defn, _ = self._get_definition(instance.process_name)
+        current = defn.get_state(instance.current_state)
+        if current is None or current.type != StateType.wait:
+            raise TransitionError(
+                f"Current state '{instance.current_state}' is not a wait state"
+            )
+
+        if current.signal.name != signal_name:
+            raise TransitionError(
+                f"Expected signal '{current.signal.name}', "
+                f"got '{signal_name}'"
+            )
+
+        # Validate required fields
+        missing = [
+            f.key for f in current.signal.required_fields
+            if f.key not in data
+        ]
+        if missing:
+            raise TransitionError(
+                f"Signal missing required fields: {', '.join(missing)}"
+            )
+
+        # Store signal data and clear waiting flag
+        instance.signal_data = data
+        instance.waiting = False
+
+        result: dict[str, Any] = {
+            "success": True,
+            "signal_received": signal_name,
+            "signal_data": data,
+        }
+
+        if target_state:
+            # Validate target is in the wait state's transitions
+            if target_state not in current.transitions:
+                raise TransitionError(
+                    f"'{target_state}' is not a valid transition from "
+                    f"wait state '{current.id}'. "
+                    f"Available: {current.transitions}"
+                )
+
+            target = defn.get_state(target_state)
+            history_entry = HistoryEntry(**{
+                "from": instance.current_state,
+                "to": target_state,
+                "at": _now_iso(),
+                "triggered_by": f"signal: {signal_name}",
+                "role": target.role if target else "",
+                "session_id": session_id,
+                "metadata": {"signal_data": data},
+            })
+
+            instance.current_state = target_state
+            instance.history.append(history_entry)
+
+            if target and target.type == StateType.terminal:
+                self._store.complete(instance)
+            else:
+                self._store.save(instance)
+
+            self._store.append_log(
+                f"SIGNAL {instance.process_name}-{instance.instance_id}: "
+                f"received '{signal_name}', transitioned to {target_state}"
+            )
+
+            result["new_state"] = target_state
+            result["available_transitions"] = target.transitions if target else []
+            result["role"] = target.role if target else ""
+        else:
+            # Signal received but no transition yet; unlock transitions
+            self._store.save(instance)
+
+            self._store.append_log(
+                f"SIGNAL {instance.process_name}-{instance.instance_id}: "
+                f"received '{signal_name}', awaiting transition"
+            )
+
+            result["new_state"] = instance.current_state
+            result["available_transitions"] = current.transitions
+
+        return result
 
     def abandon(self, instance_id: str, reason: str) -> dict[str, Any]:
         """Abandon a process instance."""

@@ -65,6 +65,10 @@ class ProcessInstance(BaseModel):
     child_instance_id: str | None = None
     suspended: bool = False
 
+    # Wait state tracking
+    waiting: bool = False
+    signal_data: dict[str, Any] | None = None
+
     model_config = {"populate_by_name": True}
 
 

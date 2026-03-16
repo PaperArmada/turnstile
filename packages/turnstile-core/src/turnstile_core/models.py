@@ -20,6 +20,7 @@ class StateType(str, Enum):
     terminal = "terminal"
     normal = "normal"
     subprocess = "subprocess"
+    wait = "wait"
 
 
 # ---------------------------------------------------------------------------
@@ -184,6 +185,20 @@ class RequiredMetadata(BaseModel):
     description: str = ""
 
 
+class SignalField(BaseModel):
+    """A required field in a signal payload."""
+
+    key: str
+    description: str = ""
+
+
+class SignalSpec(BaseModel):
+    """Specification for a signal that a wait state expects."""
+
+    name: str
+    required_fields: list[SignalField] = Field(default_factory=list)
+
+
 class AgentContext(BaseModel):
     """Configuration for specializing an agent when entering a state.
 
@@ -234,6 +249,9 @@ class ProcessState(BaseModel):
     parameter_map: dict[str, str] | None = None
     subprocess_routing: SubprocessRouting | None = None
 
+    # Wait-specific fields
+    signal: SignalSpec | None = None
+
     @model_validator(mode="after")
     def _check_subprocess_fields(self) -> ProcessState:
         if self.type == StateType.subprocess:
@@ -255,6 +273,25 @@ class ProcessState(BaseModel):
                 raise ValueError(
                     f"Non-subprocess state '{self.id}' must not have "
                     f"'subprocess_routing'"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _check_wait_fields(self) -> ProcessState:
+        if self.type == StateType.wait:
+            if not self.signal:
+                raise ValueError(
+                    f"Wait state '{self.id}' must have 'signal' field"
+                )
+            if not self.transitions:
+                raise ValueError(
+                    f"Wait state '{self.id}' must have transitions "
+                    f"(targets for after signal delivery)"
+                )
+        else:
+            if self.signal is not None:
+                raise ValueError(
+                    f"Non-wait state '{self.id}' must not have 'signal'"
                 )
         return self
 
