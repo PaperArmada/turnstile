@@ -73,17 +73,21 @@ When a session starts, the agent doesn't inherently know what it is. It gets tol
 
 1. **Process state.** The agent calls `process_status()`, sees active instances, and reads the current state's role and agent_context. The process definition tells the agent what role is needed right now.
 
-2. **SessionStart hook.** Surfaces active instances, pending work, and agent mail identity. Provides immediate situational awareness.
+2. **SessionStart hook.** Surfaces active instances, pending work, and situational context. Provides immediate awareness of what's happening on the job site.
 
 3. **Human direction.** The operator says "work on the feature-development instance" or "you're reviewing today." This is the simplest and most reliable mechanism in a single-user setup.
 
-The agent doesn't need a persistent identity to be useful. It needs to know what seat it's sitting in right now. The process instance and its state provide that.
+The agent doesn't need a persistent identity. It needs to know what seat it's sitting in right now. The process instance and its state provide that.
 
-### Agent names and audit trails
+### What gets recorded in the audit trail
 
-For tracking purposes (who made which transition), we need a stable string per session. Agent mail's auto-generated names (MistyHollow, BlueLake) serve this function. The name goes in the transition log. It doesn't confer permissions or capabilities; it's a signature in the logbook.
+AI agents lack temporal continuity and accountability. They can't be held responsible for decisions. Humans can. The audit trail reflects this:
 
-The session ID from hook JSON provides finer-grained tracking (which specific conversation made this transition) and enables concurrency detection (reject if two sessions try to transition the same instance simultaneously).
+- **Role:** Recorded on every transition. "A developer did this." The role is the meaningful unit, not the agent's name.
+- **Session ID:** Recorded on every transition. Provides correlation (which conversation made which transitions) and concurrency detection (reject if two sessions try to transition simultaneously).
+- **Human identity:** Recorded when a human acts directly, such as sending a signal for approval, directing work via CLI, or making a judgment call at a wait state. Humans bear accountability, so their involvement is tracked by name.
+
+Agent mail names (MistyHollow, BlueLake) remain useful for communication routing, but they are not identity in the accountability sense. They are addresses, not signatures.
 
 ## How work flows
 
@@ -419,9 +423,9 @@ The third approach has a compounding benefit: it makes agent_context compaction-
 
 An instance boundary. Each instance has its own state, its own history, its own parameters. Instances can be related (parent-child via dispatch or subprocess), but they're independent state machines. A child can complete, fail, or be abandoned without corrupting the parent's state.
 
-### What separates one agent from another?
+### What separates one role from another?
 
-A name boundary. Each agent has a name, a role, and a communication address. Agents don't share state. They interact through process instances (transitioning shared instances) and messages (agent mail). An agent can't directly modify another agent's context or configuration.
+Configuration. Each role has an agent_context (guidance, tools, constraints) and a communication address. Roles don't share context: when work transitions from one role to another, that's a session boundary, and context resets. Roles interact through process mechanics (dispatch, signals) and the broadcast feed (agent mail). The engine routes work to roles, not to named agents.
 
 ### What separates one session from another?
 

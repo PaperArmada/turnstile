@@ -45,11 +45,11 @@ Turnstile equivalent: signals for human approval, queries via `process_status`, 
 
 Five additions, ordered by leverage. Each is designed to compose with existing mechanics rather than replace them.
 
-### 1. Actor identity on transitions
+### 1. Role and session tracking on transitions
 
-Add an optional `actor` parameter to `transition()`, `skip()`, `abandon()`, and the corresponding MCP tools. Store it in `HistoryEntry`. Populate `started_by` from `process_start()`.
+Record the **role** (from the target state's declaration) and the **session ID** (from the runtime) on every transition in `HistoryEntry`. When a human acts directly (via CLI or signal), record their identity.
 
-This is the foundation. Everything else builds on knowing who is acting. Backward compatible: defaults to `None`, existing processes work unchanged.
+No named agent identity. AI agents lack the temporal continuity and accountability to make named identity meaningful. The role is the functional identity: it says what qualification was active. The session ID provides correlation for debugging and concurrency detection. Human identity is recorded when humans participate directly (approvals, signals, CLI commands), because humans can bear accountability.
 
 **YAML surface:** none. This is engine/MCP plumbing.
 
@@ -214,7 +214,7 @@ The engine's current architecture handles states, transitions, validation gates,
 
 ## Implementation Sequence
 
-1. **Actor identity** — engine + persistence + MCP. Small change, no YAML surface, enables everything else.
+1. **Role and session tracking** — engine + persistence + MCP. Record role and session_id on transitions, human identity on signals/CLI. Small change, no YAML surface.
 2. **Role declarations** — models + YAML surface. Advisory only at first. Test with a non-dev process definition.
 3. **Agent context** — models + MCP response. Advisory, surfaced to runtime. Does not require enforcement to be useful.
 4. **Signal primitive** — engine + persistence + new MCP tool. The most significant addition. Requires a new state type and the `process_signal` tool.
@@ -232,13 +232,13 @@ The engine's current architecture handles states, transitions, validation gates,
 
 See [multi-actor-conops.md](multi-actor-conops.md) for detailed treatment.
 
-1. **Where does agent identity come from?** Hook JSON provides `session_id` but no agent name or role. Agent mail registration (e.g., "MistyHollow") is the primary identity source. The session is the closest thing to an "entity": a full context with runtime parameters. Identity is reconstructed each session from configuration and process state, not recalled from memory. Three-level identity model proposed: implicit (single agent, no infra), parameterized (process-level role mapping), registry-level (project-wide agent declarations).
+1. **Identity model.** Named agent identity is unnecessary for the engine. AI agents lack temporal continuity and accountability; naming them adds overhead without meaningful auditability. Instead: roles are the functional identity (provisioned via agent_context on states), session IDs provide correlation and concurrency detection, and human identity is recorded when humans act directly (signals, CLI). Agent mail names remain useful as communication addresses for routing work to roles, not as identity.
 
-2. **Signal delivery mechanism.** All three: MCP tool (`process_signal`) as primary, CLI (`turnstile signal`) for human operators, agent mail for cross-agent notification. Process definitions should specify notification channel and recipient mechanically (on state entry), removing the judgment call from the agent.
+2. **Signal delivery mechanism.** All three: MCP tool (`process_signal`) as primary, CLI (`turnstile signal`) for human operators, agent mail for cross-role notification. Process definitions should specify notification channel and recipient mechanically (on state entry), removing the judgment call from the agent.
 
 3. **Blocking vs. non-blocking wait.** Wait states suspend the instance, not the agent. The agent's session can end or do other work; the instance sits on disk until a signal arrives. For the main process pattern, this means: dispatch work via async subprocess, return to ready, pick up completed work later. No parallel regions needed; concurrency lives in independent child instances.
 
-4. **Role-to-agent mapping.** Start with process parameters (Level 2): `process_start("main", {coordinator: "MistyHollow", developer: "BlueLake"})`. States reference roles; parameters resolve roles to agent names. Move to registry-level mapping (Level 3) when parameter repetition becomes painful.
+4. **Role-to-session routing.** Start with process parameters mapping roles to communication addresses: `process_start("main", {developer_address: "agent-mail-channel", reviewer_address: "..."})`. When the engine enters a dispatch or wait state, it looks up the role's address from parameters and sends the notification mechanically. No named agent registry needed until routing becomes complex.
 
 5. **Main process lifecycle.** Carried forward as open item. Persistent non-terminating processes need adapted analytics and possibly an explicit `shutdown` terminal.
 
