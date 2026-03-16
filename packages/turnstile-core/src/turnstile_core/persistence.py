@@ -25,6 +25,8 @@ class HistoryEntry(BaseModel):
     to_state: str = Field(alias="to")
     at: str
     triggered_by: str = ""
+    role: str = ""
+    session_id: str = ""
     validations: list[dict[str, Any]] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
