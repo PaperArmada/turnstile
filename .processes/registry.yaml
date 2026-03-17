@@ -12,6 +12,7 @@ local:
 - decision-record
 - peer-review
 - project-main
+- retrospective
 settings:
   state_dir: .process-state
   require_override_reason: true

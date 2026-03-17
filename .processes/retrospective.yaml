@@ -1,0 +1,125 @@
+name: retrospective
+description: "Review a process definition's effectiveness and propose improvements"
+version: "1.0.0"
+
+metadata:
+  author: "turnstile"
+  tags: ["general-purpose", "governance", "improvement"]
+  principles:
+    - render-dont-record
+    - progressive-disclosure
+
+parameters:
+  - name: process_name
+    description: "Name of the process definition to review"
+    required: true
+  - name: min_instances
+    description: "Minimum completed instances required before recommending changes (stability guard)"
+    required: false
+    default: "3"
+
+states:
+  - id: start
+    type: initial
+    transitions: [gather_data]
+
+  - id: gather_data
+    role: analyst
+    description: "Collect quantitative data from completed instances of the target process."
+    agent_context:
+      guidance: |
+        Run analytics on completed instances of ${process_name}.
+        Look at: completion rate, average state durations, backtrack
+        frequency, skip/override rate, which terminal states are reached.
+        Note any patterns. Do not draw conclusions yet.
+    transitions: [collect_feedback, abandoned]
+    on_enter:
+      validate:
+        - command: "turnstile analytics ${process_name} --json 2>/dev/null | head -5 || echo 'no analytics data'"
+          expect: not_empty
+          message: "Analytics data for ${process_name}"
+          severity: info
+        - command: "turnstile check-completed ${process_name} --json 2>/dev/null | python3 -c 'import sys,json; d=json.load(sys.stdin); print(len(d.get(\"matches\",[])))' 2>/dev/null || echo '0'"
+          expect: not_empty
+          message: "Completed instance count"
+          severity: info
+
+  - id: collect_feedback
+    role: analyst
+    description: "Gather qualitative feedback from operators who ran the process. What worked? What was friction? What was missing?"
+    agent_context:
+      guidance: |
+        Review instance histories for patterns:
+        - States that are frequently backtracked from (design problem?)
+        - States that are frequently skipped (unnecessary?)
+        - Validation gates that fail often (too strict or catching real issues?)
+        - Missing states that operators had to work around
+        Combine with any operator feedback from terminal metadata or notes.
+    transitions: [analyze, gather_data]
+
+  - id: analyze
+    role: analyst
+    description: "Synthesize data and feedback into findings. Separate signal from noise. Only recommend changes supported by multiple data points."
+    agent_context:
+      guidance: |
+        Synthesize the quantitative and qualitative data.
+        For each potential finding, ask:
+        - Is this supported by multiple instances, or just one bad run?
+        - Is this a process design issue, or an operator issue?
+        - Would changing the process actually improve outcomes?
+        Stability matters. Don't recommend changes based on thin evidence.
+    transitions: [recommend, collect_feedback]
+    on_exit:
+      validate:
+        - command: "test ${min_instances} -gt 0 2>/dev/null && echo 'stability guard active: ${min_instances} minimum instances' || echo 'no guard'"
+          expect: not_empty
+          message: "Stability guard"
+          severity: info
+
+  - id: recommend
+    role: analyst
+    description: "Produce a recommendation: patch the definition, leave it as-is, or retire it. Document the evidence for each recommendation."
+    agent_context:
+      guidance: |
+        Write your recommendation. Options:
+        - No changes: process is working well, evidence doesn't support changes
+        - Patch: specific changes to states, gates, descriptions, or agent_context
+        - Retire: process is not serving its purpose, recommend replacement or removal
+        For patches, write the specific YAML changes (patch_states format).
+        For all options, document the evidence that supports the recommendation.
+    transitions: [approval, no_changes]
+
+  - id: approval
+    type: wait
+    role: owner
+    description: "Owner reviews the recommended changes. Approve to apply, reject to discard."
+    agent_context:
+      guidance: |
+        Review the proposed changes to the process definition.
+        Consider: is the evidence sufficient? Are the changes proportionate?
+        Will this improve outcomes without adding unnecessary complexity?
+    signal:
+      name: retro_decision
+      required_fields:
+        - key: approved
+          description: "true or false"
+        - key: feedback
+          description: "Owner comments on the recommendation"
+    transitions: [apply_changes, no_changes]
+
+  - id: apply_changes
+    role: analyst
+    description: "Apply the approved changes to the process definition. Use patch_states in an override file or edit the definition directly."
+    transitions: [done]
+
+  - id: no_changes
+    type: terminal
+    description: "Retrospective complete. No changes recommended or changes rejected."
+
+  - id: done
+    type: terminal
+    description: "Retrospective complete. Changes applied to the process definition."
+
+  - id: abandoned
+    type: terminal
+    description: "Retrospective abandoned (insufficient data, not worth pursuing)."
