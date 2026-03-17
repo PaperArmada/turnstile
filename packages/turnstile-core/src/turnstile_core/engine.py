@@ -942,19 +942,65 @@ class Engine:
             instance.current_state = target_state
             instance.history.append(history_entry)
 
-            if target and target.type == StateType.terminal:
+            # Handle dispatch states reached via signal
+            if target and target.type == StateType.dispatch:
+                extra_params = {
+                    k: str(v) for k, v in data.items()
+                    if isinstance(v, (str, int, float, bool))
+                }
+                child_result = self._dispatch_child(
+                    instance, target, extra_params=extra_params,
+                )
+                immediate_state = defn.get_state(target.immediate)
+
+                auto_entry = HistoryEntry(**{
+                    "from": target_state,
+                    "to": target.immediate,
+                    "at": _now_iso(),
+                    "triggered_by": f"dispatch: {target.process}",
+                    "role": immediate_state.role if immediate_state else "",
+                    "session_id": session_id,
+                    "metadata": {
+                        "dispatched_instance": child_result["instance_id"],
+                        "dispatched_process": child_result["process_name"],
+                    },
+                })
+                instance.current_state = target.immediate
+                instance.history.append(auto_entry)
+                self._store.save(instance)
+
+                self._store.append_log(
+                    f"SIGNAL {instance.process_name}-{instance.instance_id}: "
+                    f"received '{signal_name}', dispatched {child_result['process_name']}-"
+                    f"{child_result['instance_id']}, continued to {target.immediate}"
+                )
+
+                result["new_state"] = target.immediate
+                result["available_transitions"] = immediate_state.transitions if immediate_state else []
+                result["role"] = immediate_state.role if immediate_state else ""
+                result["subprocess_started"] = child_result["instance_id"]
+            elif target and target.type == StateType.terminal:
                 self._store.complete(instance)
+
+                self._store.append_log(
+                    f"SIGNAL {instance.process_name}-{instance.instance_id}: "
+                    f"received '{signal_name}', transitioned to {target_state}"
+                )
+
+                result["new_state"] = target_state
+                result["available_transitions"] = []
+                result["role"] = target.role if target else ""
             else:
                 self._store.save(instance)
 
-            self._store.append_log(
-                f"SIGNAL {instance.process_name}-{instance.instance_id}: "
-                f"received '{signal_name}', transitioned to {target_state}"
-            )
+                self._store.append_log(
+                    f"SIGNAL {instance.process_name}-{instance.instance_id}: "
+                    f"received '{signal_name}', transitioned to {target_state}"
+                )
 
-            result["new_state"] = target_state
-            result["available_transitions"] = target.transitions if target else []
-            result["role"] = target.role if target else ""
+                result["new_state"] = target_state
+                result["available_transitions"] = target.transitions if target else []
+                result["role"] = target.role if target else ""
         else:
             # Signal received but no transition yet; unlock transitions
             self._store.save(instance)
