@@ -62,12 +62,14 @@ states:
         - Bug fix: dispatch_bugfix
         - Investigation or research: dispatch_spike
         - New process definition needed: propose_process
+        - Review/improve an existing process: dispatch_retrospective
         - Nothing to do right now: back to ready
     transitions:
       - dispatch_feature
       - dispatch_bugfix
       - dispatch_spike
       - propose_process
+      - dispatch_retrospective
       - ready
 
   # --- Dispatch states (fire-and-forget) ---
@@ -97,6 +99,14 @@ states:
       question: "${question}"
     immediate: ready
     assign_to: investigator
+
+  - id: dispatch_retrospective
+    type: dispatch
+    process: retrospective
+    parameter_map:
+      process_name: "${process_name}"
+    immediate: ready
+    assign_to: analyst
 
   # --- Process creation governance ---
 
