@@ -413,11 +413,17 @@ class Engine:
 
         all_results: list[ValidationResult] = []
 
+        # Build validation context: declared params + instance metadata
+        validation_params = {
+            **instance.parameters,
+            "instance_id": instance.instance_id,
+        }
+
         # Run on_exit validations for current state
         if current.on_exit and current.on_exit.validations:
             exit_results = await run_validations(
                 current.on_exit.validations,
-                instance.parameters,
+                validation_params,
                 self.project_root,
             )
             all_results.extend(exit_results)
@@ -434,7 +440,7 @@ class Engine:
         # Run on_exit actions for current state
         if current.on_exit and current.on_exit.actions:
             for action in current.on_exit.actions:
-                cmd = substitute_params(action.command, instance.parameters)
+                cmd = substitute_params(action.command, validation_params)
                 try:
                     await run_command(cmd, self.project_root, timeout=60)
                 except Exception:
@@ -444,7 +450,7 @@ class Engine:
         if target.on_enter and target.on_enter.validations:
             enter_results = await run_validations(
                 target.on_enter.validations,
-                instance.parameters,
+                validation_params,
                 self.project_root,
             )
             all_results.extend(enter_results)
@@ -474,7 +480,7 @@ class Engine:
         # Run on_enter actions
         if target.on_enter and target.on_enter.actions:
             for action in target.on_enter.actions:
-                cmd = substitute_params(action.command, instance.parameters)
+                cmd = substitute_params(action.command, validation_params)
                 try:
                     await run_command(cmd, self.project_root, timeout=60)
                 except Exception:
