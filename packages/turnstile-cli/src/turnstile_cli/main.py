@@ -21,7 +21,13 @@ from turnstile_core.guard import (
     update_registry_enforcement,
 )
 from turnstile_core.hooks import generate_hook, install_hook, uninstall_hook
-from turnstile_core.loader import load_definition, load_registry
+from turnstile_core.inheritance import resolve_inheritance
+from turnstile_core.loader import (
+    _is_override_file,
+    load_definition,
+    load_override,
+    load_registry,
+)
 from turnstile_core.schema import export_schemas
 from turnstile_core.template import scaffold_package
 
@@ -94,12 +100,30 @@ def cli(ctx: click.Context, project: str | None) -> None:
     ctx.obj["project"] = project
 
 
+def _load_definition_or_override(path: Path) -> "ProcessDefinition":
+    """Load a YAML file as either a definition or an override with inheritance."""
+    from turnstile_core.models import ProcessDefinition
+
+    if _is_override_file(path):
+        override = load_override(path)
+        parent_name = override.extends.rsplit("/", 1)[-1]
+        parent_path = path.parent / f"{parent_name}.yaml"
+        if not parent_path.exists():
+            raise click.ClickException(
+                f"Override extends '{override.extends}' but "
+                f"'{parent_path}' not found. Parent must be in the same directory."
+            )
+        parent = load_definition(parent_path)
+        return resolve_inheritance(override, parent)
+    return load_definition(path)
+
+
 @cli.command()
 @click.argument("path", type=click.Path(exists=True))
 def validate(path: str) -> None:
     """Validate a process definition YAML file."""
     try:
-        defn = load_definition(Path(path))
+        defn = _load_definition_or_override(Path(path))
         click.echo(f"Valid: {defn.name} v{defn.version}")
         click.echo(f"  States: {', '.join(s.id for s in defn.states)}")
         initial = defn.initial_state()
@@ -273,7 +297,7 @@ def active(ctx: click.Context) -> None:
 def graph(ctx: click.Context, name: str | None, file_path: str | None) -> None:
     """Generate a Mermaid state diagram for a process."""
     if file_path:
-        defn = load_definition(Path(file_path))
+        defn = _load_definition_or_override(Path(file_path))
         result = generate_mermaid(defn)
     elif name:
         engine = _get_engine(ctx.obj["project"])
@@ -310,7 +334,7 @@ def dry_run(
 ) -> None:
     """Simulate a process execution without running commands."""
     if file_path:
-        defn = load_definition(Path(file_path))
+        defn = _load_definition_or_override(Path(file_path))
         path = list(state_path) if state_path else None
         steps = simulate_dry_run(defn, path)
     elif name:
