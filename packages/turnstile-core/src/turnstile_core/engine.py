@@ -23,6 +23,7 @@ from turnstile_core.errors import (
 )
 from turnstile_core.loader import (
     DiscoveredDefinition,
+    definition_hash,
     discover_definitions,
     discover_definitions_full,
     load_definition,
@@ -162,6 +163,22 @@ class Engine:
     def _get_definition(self, name: str) -> tuple[ProcessDefinition, str]:
         if name not in self._definitions:
             raise ProcessNotFoundError(f"No process definition named '{name}'")
+
+        # Auto-reload if the file on disk has changed since we cached it
+        disc = self._discovered.get(name)
+        if disc and disc.source_path:
+            source = Path(disc.source_path)
+            if source.exists():
+                current_hash = definition_hash(source)
+                if current_hash != disc.file_hash:
+                    try:
+                        defn = load_definition(source)
+                        disc.file_hash = current_hash
+                        disc.definition = defn
+                        self._definitions[name] = (defn, current_hash)
+                    except Exception:
+                        pass  # Fail open: use cached version if reload fails
+
         return self._definitions[name]
 
     # -------------------------------------------------------------------
