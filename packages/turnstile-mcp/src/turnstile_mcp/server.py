@@ -65,6 +65,23 @@ async def process_list(reload: bool = False) -> dict[str, Any]:
 
 
 @mcp.tool()
+async def process_reload_definitions() -> dict[str, Any]:
+    """Reload all process definitions from disk.
+
+    Call this after editing YAML files in .processes/ to pick up
+    changes without restarting the MCP server. Reloads both the
+    registry and all process definitions.
+    """
+    engine = _get_engine()
+    engine.reload()
+    return {
+        "reloaded": True,
+        "project_root": str(engine.project_root),
+        "processes": engine.list_processes(),
+    }
+
+
+@mcp.tool()
 async def process_info(name: str) -> dict[str, Any]:
     """Get detailed information about a process definition.
 
