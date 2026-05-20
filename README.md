@@ -3,6 +3,8 @@
 [![tests](https://github.com/PaperArmada/turnstile/actions/workflows/test.yml/badge.svg)](https://github.com/PaperArmada/turnstile/actions/workflows/test.yml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
+AI agents skip steps. They declare work done before tests pass. They handle the same task differently in every session, because nothing carries forward the structural memory of "what state is this work in." When work spans multiple agents, multiple sessions, or compactions that erase the agent's context, the failure modes compound.
+
 Turnstile is a process engine for AI agents. Process definitions are YAML files with states, roles, validation gates, and async coordination between actors. Multiple agents and humans cooperate on a single process instance, with structural consistency enforced across sessions.
 
 Exposed as an MCP server, Turnstile is infrastructure your agents *use*, not a framework you build agents on. The engine sits between intent and execution: it rejects illegal transitions, provisions per-state context, and persists state to disk so work survives restarts, compactions, and operator handoff.
