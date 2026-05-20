@@ -1,10 +1,10 @@
 # Turnstile
 
-A local, single-user process enforcement engine for AI agent workflows.
+Turnstile is a process engine for AI agents. Process definitions are YAML files with states, roles, validation gates, and async coordination between actors. Multiple agents and humans cooperate on a single process instance, with structural consistency enforced across sessions.
 
-Turnstile is a deterministic state machine that sits between developer intent and agent execution. It enforces multi-step procedures by requiring agents to advance through defined states, running validation gates at each transition, and rejecting illegal moves. Process definitions are YAML files in your repository. State is persisted to disk and survives session restarts.
+Exposed as an MCP server, Turnstile is infrastructure your agents *use*, not a framework you build agents on. The engine sits between intent and execution: it rejects illegal transitions, provisions per-state context, and persists state to disk so work survives restarts, compactions, and operator handoff.
 
-Exposed as an MCP server for use with Claude Code (or any MCP-compatible client), with a CLI for validation, CI integration, and administration.
+A CLI complements the MCP surface for validation, CI integration, and administration. Works with Claude Code or any MCP-compatible client.
 
 ## How It Works
 
