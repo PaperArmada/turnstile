@@ -51,10 +51,15 @@ For the full walkthrough (writing a process, driving it from an agent, and skipp
 
 Full surface documented in [docs/reference.md](docs/reference.md).
 
+## Stability
+
+Turnstile is pre-1.0. The core engine (initial/normal/terminal states, validation gates, parameter substitution, the foundational MCP tools, the CLI, the persistence layout) is treated as stable. Layer 2 primitives (`wait`, `dispatch`, `role`, `agent_context`, signals, inheritance overrides) are experimental and may evolve before 1.0. Full details in [STABILITY.md](STABILITY.md).
+
 ## Documentation
 
 - [Quick start](docs/quickstart.md) — write a process, set up the MCP server, drive it from an agent
 - [Reference](docs/reference.md) — states, gates, parameters, MCP tools, CLI, registry, enforcement, starter pack
+- [Stability and versioning](STABILITY.md) — what's frozen, what may evolve
 - [Vision](docs/vision.md) — north star, identity, capability layers
 - [Design principles](docs/principles/) — progressive disclosure, render don't record, single process single document, fail open
 
