@@ -15,7 +15,7 @@ parameters:
     description: "Short name for the feature"
     required: true
   - name: issue_id
-    description: "Issue tracker ID (e.g., ts-abc)"
+    description: "Issue tracker ID (e.g., GitHub issue number)"
     required: false
     default: "none"
   - name: test_command
@@ -36,12 +36,7 @@ states:
     on_enter:
       validate:
         # Progressive disclosure: surface just enough context to plan the work
-        - command: "command -v bd >/dev/null 2>&1 && bd ready 2>/dev/null | head -10 || echo 'no issue tracker configured'"
-          expect: not_empty
-          message: "Available work items"
-          severity: info
-
-        - command: "test '${issue_id}' != 'none' && echo 'linked to ${issue_id}' || (command -v bd >/dev/null 2>&1 && echo 'no issue linked (bd is available, consider passing issue_id)' || echo 'no issue tracker')"
+        - command: "test '${issue_id}' != 'none' && echo 'linked to ${issue_id}' || echo 'no issue linked (consider passing issue_id)'"
           expect: not_empty
           message: "Issue linkage check"
           severity: info
