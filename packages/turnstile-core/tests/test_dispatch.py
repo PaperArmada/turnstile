@@ -6,7 +6,7 @@ import pytest
 import yaml
 
 from turnstile_core.engine import Engine
-from turnstile_core.errors import TransitionError
+from turnstile_core.errors import SubprocessError, TransitionError
 from turnstile_core.models import ProcessState, StateType
 
 
@@ -346,8 +346,9 @@ class TestParameterForwarding:
         finally:
             loop.close()
 
-    def test_missing_param_without_metadata_passes_literal(self, dynamic_engine):
-        """Without metadata, unresolved ${var} passes through as literal string."""
+    def test_missing_param_without_metadata_raises(self, dynamic_engine):
+        """Unresolved ${var} in parameter_map must raise, not silently pass
+        the literal template string as the child parameter value."""
         import asyncio
         loop = asyncio.new_event_loop()
         try:
@@ -357,12 +358,13 @@ class TestParameterForwarding:
             pid = result["instance_id"]
 
             loop.run_until_complete(dynamic_engine.transition(pid, "triage"))
-            r = loop.run_until_complete(
-                dynamic_engine.transition(pid, "dispatch_work")
-            )
-
-            # Child gets the unresolved template as a literal
-            child = dynamic_engine._store.load(r.subprocess_started)
-            assert child.parameters["task_name"] == "${task_name}"
+            with pytest.raises(SubprocessError) as exc_info:
+                loop.run_until_complete(
+                    dynamic_engine.transition(pid, "dispatch_work")
+                )
+            msg = str(exc_info.value)
+            assert "child-task" in msg
+            assert "task_name" in msg
+            assert "metadata" in msg
         finally:
             loop.close()
