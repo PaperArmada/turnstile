@@ -1,5 +1,8 @@
 # Turnstile
 
+[![tests](https://github.com/PaperArmada/turnstile/actions/workflows/test.yml/badge.svg)](https://github.com/PaperArmada/turnstile/actions/workflows/test.yml)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 Turnstile is a process engine for AI agents. Process definitions are YAML files with states, roles, validation gates, and async coordination between actors. Multiple agents and humans cooperate on a single process instance, with structural consistency enforced across sessions.
 
 Exposed as an MCP server, Turnstile is infrastructure your agents *use*, not a framework you build agents on. The engine sits between intent and execution: it rejects illegal transitions, provisions per-state context, and persists state to disk so work survives restarts, compactions, and operator handoff.
