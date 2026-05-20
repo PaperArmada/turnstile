@@ -507,4 +507,4 @@ uv run --package turnstile-core pytest packages/turnstile-core/tests/ -v
 
 ## License
 
-MIT
+Apache 2.0 — see [LICENSE](LICENSE).
