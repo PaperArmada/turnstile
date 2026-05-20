@@ -6,6 +6,20 @@ Exposed as an MCP server, Turnstile is infrastructure your agents *use*, not a f
 
 A CLI complements the MCP surface for validation, CI integration, and administration. Works with Claude Code or any MCP-compatible client.
 
+## Demo
+
+A narrated 60-second walkthrough of the engine driving peer-review through legal transitions, an illegal-transition rejection, and a role handoff:
+
+```bash
+uv run --package turnstile-core python scripts/demo.py
+```
+
+Record it as an asciinema:
+
+```bash
+asciinema rec -c 'uv run --package turnstile-core python scripts/demo.py' demo.cast
+```
+
 ## How It Works
 
 1. Define a process as a YAML file describing states, transitions, and validation gates
