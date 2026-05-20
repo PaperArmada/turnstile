@@ -11,16 +11,19 @@ A CLI complements the MCP surface for validation, CI integration, and administra
 
 ## Demo
 
-A narrated 60-second walkthrough of the engine driving peer-review through legal transitions, an illegal-transition rejection, and a role handoff:
+![Turnstile demo: peer-review with role handoffs and an illegal-transition rejection](docs/assets/demo.gif)
+
+Run it locally:
 
 ```bash
 uv run --package turnstile-core python scripts/demo.py
 ```
 
-Record it as an asciinema:
+To regenerate the recording (requires [asciinema](https://asciinema.org) and [agg](https://github.com/asciinema/agg)):
 
 ```bash
-asciinema rec -c 'uv run --package turnstile-core python scripts/demo.py' demo.cast
+asciinema rec --quiet --command 'uv run --package turnstile-core python scripts/demo.py' docs/assets/demo.cast
+agg --theme monokai --font-size 18 docs/assets/demo.cast docs/assets/demo.gif
 ```
 
 ## How It Works
