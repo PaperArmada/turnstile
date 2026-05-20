@@ -1,17 +1,5 @@
 # Agent Instructions
 
-## Issue Tracking
-
-This project uses **bd** (beads) for issue tracking. Run `bd prime` for workflow context.
-
-```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --status in_progress  # Claim work
-bd close <id>         # Complete work
-bd sync               # Sync with git
-```
-
 ## Process Enforcement
 
 This project uses **turnstile** for workflow enforcement (it is also the project being built).
@@ -46,14 +34,11 @@ See `docs/principles/` for design principles that guide this project:
 
 When ending a work session, complete ALL steps:
 
-1. File issues for remaining work
-2. Run quality gates (if code changed)
-3. Update issue status
-4. Push to remote:
+1. Run quality gates (if code changed)
+2. Push to remote:
    ```bash
    git pull --rebase
-   bd sync
    git push
    ```
-5. Verify all changes committed and pushed
-6. Provide context for next session
+3. Verify all changes committed and pushed
+4. Provide context for next session
