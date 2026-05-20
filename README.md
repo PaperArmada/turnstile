@@ -469,7 +469,7 @@ To use the starter pack in your project, copy the desired YAML files from `.proc
 
 Turnstile uses its own processes in `.processes/`:
 
-- **feature-development**: Standard development workflow with info gates that surface bd issues, test baselines, and diff stats. Test gate enforces passing suite.
+- **feature-development**: Standard development workflow with info gates that surface issue linkage, test baselines, and diff stats. Test gate enforces passing suite.
 - **create-process**: Meta-process for designing new process definitions. The understand state surfaces existing processes, design principles, and available expressions. The review state validates the YAML, dry-runs it, and checks for principle adherence.
 - **readme-update**: Guides README updates with audit, update, and verify states. Validation gates query the codebase to check completeness.
 
