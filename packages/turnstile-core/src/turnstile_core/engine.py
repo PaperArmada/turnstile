@@ -2,10 +2,40 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+_UNRESOLVED_TEMPLATE_RE = re.compile(r"\$\{([^}]+)\}")
+
+
+def _check_resolved(
+    child_process: str,
+    child_key: str,
+    value: str,
+    available: dict[str, str],
+) -> None:
+    """Raise SubprocessError if value still contains ${...} placeholders.
+
+    Called after substituting parameter_map templates. A surviving
+    placeholder means the template referenced a variable that was not in
+    the parent's parameters and was not supplied via transition metadata.
+    Silently passing the literal "${var}" as a child parameter masks the
+    error until far downstream; failing fast at dispatch time is the
+    correct behavior.
+    """
+    unresolved = _UNRESOLVED_TEMPLATE_RE.findall(value)
+    if not unresolved:
+        return
+    raise SubprocessError(
+        f"Dispatch to '{child_process}' has unresolved parameter(s) in "
+        f"parameter_map entry '{child_key}': "
+        f"{', '.join(sorted(set(unresolved)))}. "
+        f"Available keys: {sorted(available.keys())}. "
+        f"Pass the missing value(s) via the transition metadata argument."
+    )
 
 from turnstile_core.analytics import compute_analytics
 from turnstile_core.admin import (
@@ -655,9 +685,11 @@ class Engine:
         child_params: dict[str, str] = {}
         if state.parameter_map:
             for child_key, template in state.parameter_map.items():
-                child_params[child_key] = substitute_params(
-                    template, parent.parameters
+                substituted = substitute_params(template, parent.parameters)
+                _check_resolved(
+                    state.process, child_key, substituted, parent.parameters
                 )
+                child_params[child_key] = substituted
 
         # Start the child process
         child_defn, child_hash = self._get_definition(state.process)
@@ -718,9 +750,9 @@ class Engine:
         child_params: dict[str, str] = {}
         if state.parameter_map:
             for child_key, template in state.parameter_map.items():
-                child_params[child_key] = substitute_params(
-                    template, param_context
-                )
+                substituted = substitute_params(template, param_context)
+                _check_resolved(state.process, child_key, substituted, param_context)
+                child_params[child_key] = substituted
 
         child_defn, child_hash = self._get_definition(state.process)
         for p in child_defn.parameters:
