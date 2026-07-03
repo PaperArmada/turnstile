@@ -83,6 +83,8 @@ docs/
   reference.md        # Full reference (gates, tools, registry, enforcement)
   vision.md           # North star
   principles/         # Design principles
+examples/
+  *.yaml              # Feature-showcase process definitions
 scripts/
   demo.py             # 60-second narrated walkthrough
 ```
@@ -92,6 +94,10 @@ scripts/
 ```bash
 uv run --package turnstile-core pytest packages/turnstile-core/tests/ -v
 ```
+
+## Contributing
+
+Issues and PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, tests, and how to propose process definitions.
 
 ## License
 
