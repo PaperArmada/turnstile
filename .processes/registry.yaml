@@ -7,12 +7,10 @@ local:
 - code-review
 - release
 - spike
-- heist
 - scientific-method
 - decision-record
 - peer-review
-- project-main
-- retrospective
+- security-review
 settings:
   state_dir: .process-state
   require_override_reason: true

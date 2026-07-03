@@ -245,7 +245,9 @@ Without a registry, turnstile auto-discovers all `.yaml` files in `.processes/`.
 
 ## Inheritance and overrides
 
-Override an inherited process definition by placing a YAML file in `.processes/overrides/`:
+Specialize an existing process definition with an override file: a YAML file with an `extends` key and an `overrides` block in place of a full `states` list. Override files can live in `.processes/overrides/` or directly in `.processes/` (listed in the registry like any other definition). The parent may be a local definition or one pulled from an extended source; override files inside extended-source directories themselves are not supported. The starter pack's `security-review` uses this to specialize `peer-review`.
+
+Naming rules: an override with its own `name` creates a new process alongside the parent. An override without a `name` patches the parent in place, whatever that name finally resolves to. An override whose name collides with an unrelated local definition is rejected at load time.
 
 ```yaml
 # .processes/overrides/feature-deploy.yaml
@@ -351,18 +353,34 @@ Enforcement is configured in `registry.yaml` under `settings.enforcement` and wo
 
 ## Starter pack
 
-Turnstile ships with general-purpose processes suitable for any project:
+Turnstile ships with a curated set of processes in [`.processes/`](../.processes/).
+
+General-purpose (work in any domain, not just software):
 
 | Process | Purpose | States |
 |---------|---------|--------|
+| `peer-review` | Structured peer review with role handoff | prepare → awaiting_review → revise → accepted |
+| `decision-record` | Structured decision-making with auditable record | frame → gather → evaluate → decide → communicate |
+| `scientific-method` | Structured investigation | observe → hypothesize → test → conclude |
+| `security-review` | Security-focused review; extends `peer-review` via inheritance | prepare → awaiting_review → revise → accepted |
+
+Developer-oriented:
+
+| Process | Purpose | States |
+|---------|---------|--------|
+| `feature-development` | Standard feature workflow | understand → implement → test → review → done |
 | `bug-fix` | Structured bug fix: reproduce, diagnose, fix, verify | reproduce → diagnose → fix → verify → done |
 | `code-review` | Review a changeset or pull request | survey → review → request_changes / approve |
 | `release` | Prepare and ship a versioned release | prepare → validate → tag → done |
 | `spike` | Time-boxed investigation with a written outcome | investigate → write_up → done / abandoned |
-| `peer-review` | Structured peer review with role handoff | prepare → awaiting_review → revise → accepted |
-| `decision-record` | Structured decision-making with auditable record | frame → gather → evaluate → decide → communicate |
-| `scientific-method` | Structured investigation | observe → hypothesize → test → conclude |
+
+Meta (processes for managing processes):
+
+| Process | Purpose | States |
+|---------|---------|--------|
+| `create-process` | Design and validate a new process definition | understand → draft → review → done |
+| `readme-update` | Keep the README aligned with the codebase | audit → update → verify → done |
 
 Each process uses info-severity gates to surface relevant context (recent commits, diff stats, working tree status) and back-transitions for forgiveness. They are generic by design, using git as the common denominator rather than project-specific tooling.
 
-To use the starter pack in your project, copy the desired YAML files from `.processes/` or reference them via the registry `extends` field.
+To use the starter pack in your project, copy the desired YAML files from `.processes/` or reference them via the registry `extends` field. Additional definitions that showcase specific engine features (branching, dispatch, wait states) live in [`examples/`](../examples/).

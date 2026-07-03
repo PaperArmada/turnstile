@@ -101,32 +101,48 @@ def load_override(path: Path) -> ProcessOverride:
 
 
 def _is_override_file(path: Path) -> bool:
-    """Check if a YAML file is an override (has 'overrides' key)."""
+    """Check if a YAML file is an override.
+
+    Overrides have both an 'extends' key and an 'overrides' block.
+    Requiring both avoids misclassifying a full definition that happens
+    to carry a stray 'overrides' key.
+    """
     try:
         raw = yaml.safe_load(path.read_text())
-        return isinstance(raw, dict) and "overrides" in raw
+        return isinstance(raw, dict) and "overrides" in raw and "extends" in raw
     except Exception:
         return False
 
 
-def _load_overrides(
-    overrides_dir: Path,
+def _resolve_overrides(
+    override_paths: list[Path],
     available: dict[str, DiscoveredDefinition],
+    strict_paths: frozenset[Path] = frozenset(),
+    lenient_paths: frozenset[Path] = frozenset(),
 ) -> dict[str, DiscoveredDefinition]:
-    """Load override files and resolve them against available definitions.
+    """Resolve override files against available definitions.
 
-    Override files in .processes/overrides/ extend parent definitions
-    that must already be loaded (from extended sources or local).
+    Override files extend parent definitions that must already be
+    loaded (from extended sources or local definitions). They may live
+    in .processes/overrides/ or as top-level .processes/*.yaml files.
+
+    Error strictness depends on how the file was found:
+    - strict_paths (explicitly listed in registry.local): any load or
+      resolution failure raises.
+    - lenient_paths (auto-discovered top-level files): a missing parent
+      is logged and the file skipped, so one stray file cannot take
+      down discovery (fail open).
+    - overrides/ directory files (neither set): invalid files are
+      skipped with a warning; a missing parent raises.
     """
-    if not overrides_dir.is_dir():
-        return {}
-
     results: dict[str, DiscoveredDefinition] = {}
 
-    for path in sorted(overrides_dir.glob("*.yaml")):
+    for path in override_paths:
         try:
             override = load_override(path)
         except DefinitionError as e:
+            if path in strict_paths:
+                raise
             logger.warning(f"Skipping invalid override {path}: {e}")
             continue
 
@@ -136,6 +152,12 @@ def _load_overrides(
         parent_name = override.extends.rsplit("/", 1)[-1]
         parent_disc = available.get(parent_name)
         if parent_disc is None:
+            if path in lenient_paths:
+                logger.warning(
+                    f"Skipping override {path}: no parent definition "
+                    f"named '{parent_name}' was found"
+                )
+                continue
             raise InheritanceError(
                 f"Override in {path} extends '{override.extends}' "
                 f"but no parent definition named '{parent_name}' was found"
@@ -150,6 +172,27 @@ def _load_overrides(
                 f"Failed to resolve override {path}: {e}"
             ) from e
 
+        # An override may patch its own parent in place (no distinct
+        # name), but colliding with an unrelated local definition is a
+        # configuration error, not a silent shadow.
+        existing = available.get(merged.name)
+        if (
+            existing is not None
+            and existing.source == "local"
+            and merged.name != parent_name
+        ):
+            raise InheritanceError(
+                f"Override {path} resolves to name '{merged.name}', "
+                f"which collides with the local definition at "
+                f"{existing.source_path}. Rename the override or "
+                f"remove the local definition."
+            )
+
+        if merged.name in results:
+            logger.warning(
+                f"Multiple override files resolve to '{merged.name}'; "
+                f"{path} takes precedence"
+            )
         results[merged.name] = DiscoveredDefinition(
             definition=merged,
             file_hash=definition_hash(path),
@@ -203,10 +246,14 @@ def _load_from_directory(
 def _discover_all(project_root: Path) -> dict[str, DiscoveredDefinition]:
     """Internal: discover all definitions from all sources.
 
-    Loading order (later overrides earlier):
-    1. Extended sources from registry.yaml
-    2. Override files from .processes/overrides/
-    3. Local definitions from .processes/*.yaml or registry.local
+    Loading order:
+    1. Extended sources from registry.yaml (lowest priority)
+    2. Local definitions from .processes/*.yaml or registry.local
+       (override extended sources)
+    3. Override files (.processes/overrides/ plus override-shaped local
+       files), resolved against everything above. An override may patch
+       its own parent in place; colliding with an unrelated local
+       definition raises.
     """
     processes_dir = project_root / ".processes"
     if not processes_dir.exists():
@@ -226,13 +273,10 @@ def _discover_all(project_root: Path) -> dict[str, DiscoveredDefinition]:
             defs = _load_from_directory(resolved_dir, process_filter, label)
             all_discovered.update(defs)
 
-    # 2. Load override files (resolve against extended definitions)
-    overrides_dir = processes_dir / "overrides"
-    if overrides_dir.is_dir():
-        overridden = _load_overrides(overrides_dir, all_discovered)
-        all_discovered.update(overridden)
-
-    # 3. Load local definitions (highest priority, override everything)
+    # 2. Load local definitions. Override-shaped files (with an
+    #    'overrides' block) are deferred to step 3 so they can extend
+    #    local parents as well as extended sources.
+    local_override_paths: list[Path] = []
     if registry.local:
         for name in registry.local:
             path = processes_dir / f"{name}.yaml"
@@ -241,6 +285,9 @@ def _discover_all(project_root: Path) -> dict[str, DiscoveredDefinition]:
                     f"Local process '{name}' listed in registry but "
                     f"file not found: {path}"
                 )
+            if _is_override_file(path):
+                local_override_paths.append(path)
+                continue
             defn = load_definition(path)
             if defn.name in all_discovered:
                 logger.info(
@@ -258,8 +305,8 @@ def _discover_all(project_root: Path) -> dict[str, DiscoveredDefinition]:
         for path in sorted(processes_dir.glob("*.yaml")):
             if path.name == "registry.yaml":
                 continue
-            # Skip files that look like overrides in the top-level dir
             if _is_override_file(path):
+                local_override_paths.append(path)
                 continue
             defn = load_definition(path)
             if defn.name in all_discovered:
@@ -273,6 +320,25 @@ def _discover_all(project_root: Path) -> dict[str, DiscoveredDefinition]:
                 source="local",
                 source_path=str(path),
             )
+
+    # 3. Resolve override files against extended + local definitions.
+    #    Registry-listed files are strict (failures raise); auto-
+    #    discovered top-level files are lenient (skipped with a warning
+    #    if their parent is missing).
+    override_paths: list[Path] = []
+    overrides_dir = processes_dir / "overrides"
+    if overrides_dir.is_dir():
+        override_paths.extend(sorted(overrides_dir.glob("*.yaml")))
+    override_paths.extend(local_override_paths)
+    local_override_set = frozenset(local_override_paths)
+    all_discovered.update(
+        _resolve_overrides(
+            override_paths,
+            all_discovered,
+            strict_paths=local_override_set if registry.local else frozenset(),
+            lenient_paths=frozenset() if registry.local else local_override_set,
+        )
+    )
 
     return all_discovered
 

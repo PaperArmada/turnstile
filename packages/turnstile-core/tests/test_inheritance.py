@@ -338,8 +338,254 @@ class TestOverrideLoader:
         with pytest.raises(InheritanceError, match="was found"):
             discover_definitions(tmp_path)
 
-    def test_local_overrides_merged_definition(self, tmp_path):
-        """A local definition with the same name takes priority over override."""
+    def test_override_extends_local_definition(self, tmp_path):
+        """Override files in overrides/ can extend local definitions."""
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir()
+        overrides_dir = proc_dir / "overrides"
+        overrides_dir.mkdir()
+
+        parent_data = {
+            "name": "release",
+            "version": "1.0.0",
+            "states": [
+                {"id": "start", "type": "initial", "transitions": ["done"]},
+                {"id": "done", "type": "terminal"},
+            ],
+        }
+        (proc_dir / "release.yaml").write_text(yaml.dump(parent_data))
+
+        override_data = {
+            "extends": "release",
+            "name": "release-custom",
+            "version": "1.1.0",
+            "overrides": {
+                "add_states": [
+                    {"id": "lint", "transitions": ["done"]},
+                ],
+                "patch_states": [
+                    {"id": "start", "transitions": ["lint"]},
+                ],
+            },
+        }
+        (overrides_dir / "release-custom.yaml").write_text(
+            yaml.dump(override_data)
+        )
+
+        result = discover_definitions(tmp_path)
+        assert "release" in result
+        assert "release-custom" in result
+        defn, _ = result["release-custom"]
+        assert defn.version == "1.1.0"
+        assert "lint" in [s.id for s in defn.states]
+
+    def test_registry_local_override_file(self, tmp_path):
+        """A top-level override file listed in registry.local resolves
+        against a local parent."""
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir()
+
+        parent_data = {
+            "name": "release",
+            "version": "1.0.0",
+            "states": [
+                {"id": "start", "type": "initial", "transitions": ["done"]},
+                {"id": "done", "type": "terminal"},
+            ],
+        }
+        (proc_dir / "release.yaml").write_text(yaml.dump(parent_data))
+
+        override_data = {
+            "extends": "release",
+            "name": "release-custom",
+            "overrides": {
+                "add_states": [
+                    {"id": "lint", "transitions": ["done"]},
+                ],
+                "patch_states": [
+                    {"id": "start", "transitions": ["lint"]},
+                ],
+            },
+        }
+        (proc_dir / "release-custom.yaml").write_text(
+            yaml.dump(override_data)
+        )
+
+        (proc_dir / "registry.yaml").write_text(yaml.dump({
+            "version": "1.0",
+            "local": ["release", "release-custom"],
+        }))
+
+        result = discover_definitions(tmp_path)
+        assert "release" in result
+        assert "release-custom" in result
+        defn, _ = result["release-custom"]
+        assert "lint" in [s.id for s in defn.states]
+
+    def test_unnamed_override_patches_local_parent_in_place(self, tmp_path):
+        """An override without a distinct name patches its own local
+        parent in place, matching the extended-source behavior."""
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir()
+        overrides_dir = proc_dir / "overrides"
+        overrides_dir.mkdir()
+
+        parent_data = {
+            "name": "release",
+            "version": "1.0.0",
+            "states": [
+                {"id": "start", "type": "initial", "transitions": ["done"]},
+                {"id": "done", "type": "terminal"},
+            ],
+        }
+        (proc_dir / "release.yaml").write_text(yaml.dump(parent_data))
+
+        override_data = {
+            "extends": "release",
+            "version": "2.0.0",
+            "overrides": {},
+        }
+        (overrides_dir / "release.yaml").write_text(yaml.dump(override_data))
+
+        result = discover_definitions(tmp_path)
+        defn, _ = result["release"]
+        assert defn.version == "2.0.0"
+
+    def test_override_colliding_with_unrelated_local_raises(self, tmp_path):
+        """An override whose resolved name matches an unrelated local
+        definition is a configuration error, not a silent shadow."""
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir()
+        overrides_dir = proc_dir / "overrides"
+        overrides_dir.mkdir()
+
+        for name in ("release", "deploy"):
+            data = {
+                "name": name,
+                "version": "1.0.0",
+                "states": [
+                    {"id": "start", "type": "initial", "transitions": ["done"]},
+                    {"id": "done", "type": "terminal"},
+                ],
+            }
+            (proc_dir / f"{name}.yaml").write_text(yaml.dump(data))
+
+        override_data = {
+            "extends": "release",
+            "name": "deploy",  # collides with the unrelated local 'deploy'
+            "overrides": {},
+        }
+        (overrides_dir / "bad.yaml").write_text(yaml.dump(override_data))
+
+        with pytest.raises(InheritanceError, match="collides"):
+            discover_definitions(tmp_path)
+
+    def test_autodiscover_top_level_override_resolves(self, tmp_path):
+        """Auto-discovery (no registry.local) resolves a top-level
+        override file against a local parent."""
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir()
+
+        parent_data = {
+            "name": "release",
+            "version": "1.0.0",
+            "states": [
+                {"id": "start", "type": "initial", "transitions": ["done"]},
+                {"id": "done", "type": "terminal"},
+            ],
+        }
+        (proc_dir / "release.yaml").write_text(yaml.dump(parent_data))
+
+        override_data = {
+            "extends": "release",
+            "name": "release-custom",
+            "overrides": {
+                "add_states": [{"id": "lint", "transitions": ["done"]}],
+                "patch_states": [{"id": "start", "transitions": ["lint"]}],
+            },
+        }
+        (proc_dir / "release-custom.yaml").write_text(yaml.dump(override_data))
+
+        result = discover_definitions(tmp_path)
+        assert "release-custom" in result
+        defn, _ = result["release-custom"]
+        assert "lint" in [s.id for s in defn.states]
+
+    def test_autodiscover_stray_override_skipped(self, tmp_path):
+        """A stray auto-discovered override with a missing parent is
+        skipped with a warning; other definitions still load (fail open)."""
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir()
+
+        good_data = {
+            "name": "good",
+            "version": "1.0.0",
+            "states": [
+                {"id": "start", "type": "initial", "transitions": ["done"]},
+                {"id": "done", "type": "terminal"},
+            ],
+        }
+        (proc_dir / "good.yaml").write_text(yaml.dump(good_data))
+
+        stray_data = {
+            "extends": "removed-parent",
+            "overrides": {},
+        }
+        (proc_dir / "stray.yaml").write_text(yaml.dump(stray_data))
+
+        result = discover_definitions(tmp_path)
+        assert "good" in result
+        assert len(result) == 1
+
+    def test_registry_local_stray_override_raises(self, tmp_path):
+        """An override explicitly listed in registry.local with a
+        missing parent raises instead of being silently skipped."""
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir()
+
+        stray_data = {
+            "extends": "removed-parent",
+            "overrides": {},
+        }
+        (proc_dir / "stray.yaml").write_text(yaml.dump(stray_data))
+
+        (proc_dir / "registry.yaml").write_text(yaml.dump({
+            "version": "1.0",
+            "local": ["stray"],
+        }))
+
+        with pytest.raises(InheritanceError, match="was found"):
+            discover_definitions(tmp_path)
+
+    def test_full_definition_with_stray_overrides_key_loads(self, tmp_path):
+        """A full definition carrying a stray 'overrides' key (but no
+        'extends') is not misclassified as an override file."""
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir()
+
+        data = {
+            "name": "deploy",
+            "version": "1.0.0",
+            "overrides": {},  # stray key, e.g. leftover from a conversion
+            "states": [
+                {"id": "start", "type": "initial", "transitions": ["done"]},
+                {"id": "done", "type": "terminal"},
+            ],
+        }
+        (proc_dir / "deploy.yaml").write_text(yaml.dump(data))
+
+        (proc_dir / "registry.yaml").write_text(yaml.dump({
+            "version": "1.0",
+            "local": ["deploy"],
+        }))
+
+        result = discover_definitions(tmp_path)
+        assert "deploy" in result
+
+    def test_local_replaces_extended_then_override_patches(self, tmp_path):
+        """A local full definition replaces the extended parent, and an
+        unnamed override then patches the local in place. The override
+        always applies to whatever its parent name finally resolves to."""
         shared_dir = tmp_path / "shared"
         shared_dir.mkdir()
         parent_data = {
@@ -384,4 +630,4 @@ class TestOverrideLoader:
 
         result = discover_definitions(tmp_path)
         defn, _ = result["release"]
-        assert defn.version == "3.0.0"  # local wins
+        assert defn.version == "2.0.0"  # override patched the local
