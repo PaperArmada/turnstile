@@ -17,7 +17,10 @@ uv.lock
 
 # Machine-specific (contains absolute paths, regenerate with `turnstile init`)
 .mcp.json
-.claude/settings.json
+.claude/
+
+# Generated JSON schemas (regenerate with `turnstile schema`)
+.processes/schemas/
 
 # IDE
 .vscode/
@@ -31,6 +34,3 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
-
-# Claude Code local settings (contains secrets)
-.claude/settings.local.json
