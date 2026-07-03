@@ -1,7 +1,7 @@
 [project]
 name = "turnstile-cli"
 version = "0.1.0"
-description = "CLI tool for turnstile process engine"
+description = "CLI for the Turnstile process engine"
 requires-python = ">=3.12"
 dependencies = [
     "turnstile-core",
