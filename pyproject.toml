@@ -1,7 +1,7 @@
 [project]
 name = "turnstile-workspace"
 version = "0.1.0"
-description = "Process enforcement engine for AI agent workflows"
+description = "Process engine for AI agents"
 requires-python = ">=3.12"
 
 [tool.uv]

@@ -2,7 +2,7 @@
 
 ## Scope
 
-This is a **local, single-user, single-repo** process enforcement engine. It
+This is a **local, single-user, single-repo** process engine. It
 exists to solve one problem: AI agents working in a codebase cannot be trusted
 to follow multi-step procedures reliably. Documentation is advisory. This system
 is structural.
