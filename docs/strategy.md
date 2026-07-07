@@ -147,9 +147,12 @@ Phase 2 is complete (experimental surface).
 
 **Phase 3 — meet users where they already are**
 
-7. CLAUDE.md migration: a command that extracts the workflow content
-   of an existing CLAUDE.md/rules file into a process definition.
-   Every "begging markdown" file in the wild is a lead.
+7. ✅ CLAUDE.md migration: `turnstile adopt` extracts the workflow
+   content of an existing CLAUDE.md/AGENTS.md/.cursorrules file —
+   verification commands become gates, prohibitions become command
+   restrictions — drafts a valid definition + acceptance policy, and
+   reports every judgment call with source line references. Every
+   "begging markdown" file in the wild is a lead.
 8. Definition library: curated, versioned, community-contributable
    catalog of codified workflows (release, incident response,
    security review, data migration). Definitions are the network
