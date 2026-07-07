@@ -197,6 +197,24 @@ The engineering obligations this proof sketch creates (tracked in
 5. Hash-chained trail with contemporaneous external anchoring.
 6. `turnstile doctor` for acceptance-boundary configuration.
 
+## Proof of concept
+
+Every mechanism above has a working proof of concept in this repo:
+
+- **`turnstile_core/ops/verify.py`** (experimental) — the acceptance
+  policy model, hash-chained trail + anchor comparison, HMAC signal
+  signatures, gate re-execution, and git-reachability artifact
+  binding.
+- **`turnstile verify <instance> --policy <yaml> [--range a..b]`** —
+  the CLI, exiting 0/1, ready to wire into a required CI check.
+- **`scripts/poc_guarantee.py`** — the attack demo: six scenarios
+  (clean run, tampered ledger, reality drift, self-approval,
+  uncertified commit, skipped review) staged against a real engine,
+  each caught by exactly the mechanism this document predicts.
+- **`tests/test_verify.py`** — the same scenarios as CI-durable tests.
+
+Run the demo: `uv run python scripts/poc_guarantee.py`
+
 ## Honest limits, restated
 
 Turnstile makes your workflow a **specification** and then makes that

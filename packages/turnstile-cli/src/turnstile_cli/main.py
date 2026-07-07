@@ -14,7 +14,7 @@ import os
 
 import click
 
-from turnstile_cli import bootstrap, definitions, enforcement, instances
+from turnstile_cli import bootstrap, definitions, enforcement, instances, verification
 
 
 @click.group()
@@ -58,6 +58,9 @@ cli.add_command(bootstrap.hooks)
 # Enforcement
 cli.add_command(enforcement.guard)
 cli.add_command(enforcement.enforce)
+
+# Acceptance verification (experimental)
+cli.add_command(verification.verify)
 
 
 if __name__ == "__main__":
