@@ -61,6 +61,7 @@ Turnstile is pre-1.0. The core engine (initial/normal/terminal states, validatio
 
 - [Quick start](docs/quickstart.md) — write a process, set up the MCP server, drive it from an agent
 - [Reference](docs/reference.md) — states, gates, parameters, MCP tools, CLI, registry, enforcement, starter pack
+- [Architecture](docs/architecture.md) — functional core / imperative shell, the layer map, design rules
 - [Stability and versioning](STABILITY.md) — what's frozen, what may evolve
 - [Vision](docs/vision.md) — north star, identity, capability layers
 - [Design principles](docs/principles/) — progressive disclosure, render don't record, single process single document, fail open
@@ -73,9 +74,13 @@ Turnstile uses its own processes in [`.processes/`](.processes/). The starter pa
 
 ```
 packages/
-  turnstile-core/     # Models, loader, validator, persistence, engine,
-                      # analytics, hooks, notifications, inheritance,
-                      # registry, schema, template
+  turnstile-core/     # Layered core (see docs/architecture.md):
+                      #   definition/  what a process is (models, loader,
+                      #                inheritance, registry, analysis)
+                      #   instance/    what a run is (records, file store)
+                      #   kernel/      pure transition semantics (no I/O)
+                      #   runtime/     Engine facade, gates, notifications
+                      #   ops/         enforcement, guard, git hooks
   turnstile-mcp/      # MCP server (FastMCP, stdio transport)
   turnstile-cli/      # CLI (Click)
 docs/

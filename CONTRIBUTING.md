@@ -20,13 +20,17 @@ The workspace has three packages:
 
 ```
 packages/
-  turnstile-core/     # Engine: models, loader, validator, persistence, engine
+  turnstile-core/     # Layered core: definition/, instance/, kernel/,
+                      # runtime/, ops/ — see docs/architecture.md
   turnstile-mcp/      # MCP server wrapping the core
   turnstile-cli/      # CLI
 ```
 
 Most changes land in `turnstile-core`. The MCP server and CLI are thin
 wrappers over it, and all tests currently live in `turnstile-core/tests/`.
+Before adding code, read [docs/architecture.md](docs/architecture.md) for
+where things live (pure decisions go in `kernel/`, side effects in
+`runtime/`) and the one-way import direction between layers.
 
 ## Running tests
 
