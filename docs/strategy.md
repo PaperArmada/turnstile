@@ -106,21 +106,29 @@ supporting infrastructure.
 **Phase 1 — make the guarantee airtight** (engine work; the threat
 model driving every item is [guarantee.md](guarantee.md))
 
-1. `turnstile verify` with per-process acceptance policy (required
+1. ✅ `turnstile verify` with per-process acceptance policy (required
    states, required gates, re-run gates, allowed exceptions).
-2. Gate re-execution at verify time; gates classified re-runnable vs.
-   advisory and reported as PROVEN vs. ATTESTED.
-3. Artifact binding: record the git SHA on every history entry and
-   check commit-range coverage in `verify` — the trail certifies
-   *this diff*, not just that *a process ran*.
-4. Authenticated human signals (GitHub approval, operator-signed CLI);
-   an agent-callable signal on a human-gated wait state fails
-   verification.
-5. Hash-chained ledger with contemporaneous external anchoring.
-6. `turnstile doctor`: verify the acceptance boundary itself (branch
-   protection on, check required, direct pushes off).
+2. ✅ Gate re-execution at verify time; gates classified re-runnable
+   vs. advisory and reported as PROVEN vs. ATTESTED.
+3. ✅ Artifact binding: the engine records the git SHA on every
+   history entry; `verify` checks commit-range coverage — the trail
+   certifies *this diff*, not just that *a process ran*.
+4. ✅ Authenticated human signals: `turnstile approve` (operator-
+   signed CLI) and the Action's `require-pr-approval` (GitHub
+   identity); an agent-delivered signal on a human-gated wait state
+   fails verification.
+5. ✅ Hash-chained ledger with contemporaneous external anchoring
+   (engine-side; file and command backends; reference append-only
+   anchor server in `ops/anchor_server.py`).
+6. ✅ `turnstile doctor`: verify the acceptance boundary itself
+   (anchor/key placement, ledger visibility, branch protection where
+   queryable).
 7. Widen guard interception: state permissions govern Bash/git/deploy
    tool calls, not just file edits.
+
+All shipped items are experimental surface (see
+[STABILITY.md](../STABILITY.md)); usage in
+[verification.md](verification.md).
 
 **Phase 2 — put the proof where decisions happen**
 

@@ -313,3 +313,41 @@ class TestVerifyScenarios:
         assert any(
             c.status == "FAIL" and c.name == "completion" for c in report.checks
         )
+
+
+class TestLedgerCommitExemption:
+    async def test_ledger_only_commit_exempt_from_binding(self, sandbox):
+        """With a committed ledger, the certification record lands after
+        the certified snapshot; a commit touching only .process-state/
+        must not fail binding."""
+        iid = await run_workflow(sandbox)
+        root = sandbox["root"]
+        ledger = root / ".process-state" / "note.json"
+        ledger.parent.mkdir(exist_ok=True)
+        ledger.write_text("{}")
+        sh(root, "git", "add", "-A")
+        sh(root, "git", "commit", "-qm", "ledger: record instance")
+
+        report = await verify_instance(
+            root, iid, make_policy(sandbox),
+            commit_range=f"{sandbox['base']}..HEAD",
+        )
+        assert report.passed, report.render()
+        binding = next(c for c in report.checks if c.name == "artifact binding")
+        assert "ledger-only" in binding.detail
+
+    async def test_mixed_commit_not_exempt(self, sandbox):
+        """A commit touching the ledger AND product code is not exempt."""
+        iid = await run_workflow(sandbox)
+        root = sandbox["root"]
+        (root / ".process-state" / "note.json").parent.mkdir(exist_ok=True)
+        (root / ".process-state" / "note.json").write_text("{}")
+        (root / "sneaky.py").write_text("# hidden in the ledger commit\n")
+        sh(root, "git", "add", "-A")
+        sh(root, "git", "commit", "-qm", "ledger: record instance (and more)")
+
+        report = await verify_instance(
+            root, iid, make_policy(sandbox),
+            commit_range=f"{sandbox['base']}..HEAD",
+        )
+        assert not report.passed

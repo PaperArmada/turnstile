@@ -1,0 +1,166 @@
+{
+  "instance_id": "cb14cf",
+  "process_name": "feature-development",
+  "process_version": "1.3.0",
+  "definition_hash": "sha256:b36db207cf58",
+  "parameters": {
+    "feature_name": "verify-poc",
+    "test_command": "uv run pytest packages/turnstile-core/tests/",
+    "issue_id": "none"
+  },
+  "current_state": "done",
+  "started_at": "2026-07-07T11:54:31.764848+00:00",
+  "updated_at": "2026-07-07T12:00:36.700747+00:00",
+  "started_by": "",
+  "history": [
+    {
+      "from": "start",
+      "to": "understand",
+      "at": "2026-07-07T11:54:57.097313+00:00",
+      "triggered_by": "",
+      "role": "",
+      "session_id": "poc-session",
+      "validations": [
+        {
+          "command": "test 'none' != 'none' && echo 'linked to none' || echo 'no issue linked (consider passing issue_id)'",
+          "expect": "not_empty",
+          "passed": true,
+          "output": "no issue linked (consider passing issue_id)",
+          "exit_code": 0,
+          "message": "Issue linkage check",
+          "severity": "info",
+          "error": "",
+          "elapsed_ms": 2
+        },
+        {
+          "command": "uv run pytest packages/turnstile-core/tests/ 2>&1 | tail -1 || echo 'no test output'",
+          "expect": "not_empty",
+          "passed": true,
+          "output": "======================= 491 passed, 1 warning in 24.73s ========================",
+          "exit_code": 0,
+          "message": "Current test suite status (baseline before changes)",
+          "severity": "info",
+          "error": "",
+          "elapsed_ms": 25318
+        },
+        {
+          "command": "git status --short | head -20",
+          "expect": "empty",
+          "passed": true,
+          "output": "",
+          "exit_code": 0,
+          "message": "Working tree should be clean before starting",
+          "severity": "warning",
+          "error": "",
+          "elapsed_ms": 10
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "from": "understand",
+      "to": "implement",
+      "at": "2026-07-07T11:54:57.098216+00:00",
+      "triggered_by": "",
+      "role": "",
+      "session_id": "poc-session",
+      "validations": [],
+      "metadata": {}
+    },
+    {
+      "from": "implement",
+      "to": "test",
+      "at": "2026-07-07T11:59:41.437028+00:00",
+      "triggered_by": "",
+      "role": "",
+      "session_id": "poc-session",
+      "validations": [
+        {
+          "command": "git diff --stat HEAD 2>/dev/null | tail -1 || echo 'no changes'",
+          "expect": "not_empty",
+          "passed": true,
+          "output": "3 files changed, 27 insertions(+), 1 deletion(-)",
+          "exit_code": 0,
+          "message": "Changes since last commit",
+          "severity": "info",
+          "error": "",
+          "elapsed_ms": 6
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "from": "test",
+      "to": "review",
+      "at": "2026-07-07T12:00:36.699710+00:00",
+      "triggered_by": "",
+      "role": "",
+      "session_id": "poc-session",
+      "validations": [
+        {
+          "command": "uv run pytest packages/turnstile-core/tests/ 2>&1 | tail -1",
+          "expect": "contains(\"passed\")",
+          "passed": true,
+          "output": "======================= 506 passed, 1 warning in 27.02s ========================",
+          "exit_code": 0,
+          "message": "Test suite must pass",
+          "severity": "error",
+          "error": "",
+          "elapsed_ms": 27449
+        },
+        {
+          "command": "uv run pytest packages/turnstile-core/tests/ 2>&1 | tail -1 | grep -oP '\\d+(?= passed)'",
+          "expect": "not_empty",
+          "passed": true,
+          "output": "506",
+          "exit_code": 0,
+          "message": "Test count (verify no regressions)",
+          "severity": "info",
+          "error": "",
+          "elapsed_ms": 27800
+        },
+        {
+          "command": "git diff --name-only 2>/dev/null | wc -l | tr -d ' '",
+          "expect": "greater_than(0)",
+          "passed": true,
+          "output": "3",
+          "exit_code": 0,
+          "message": "Must have uncommitted changes to review",
+          "severity": "warning",
+          "error": "",
+          "elapsed_ms": 6
+        },
+        {
+          "command": "git diff --stat 2>/dev/null",
+          "expect": "not_empty",
+          "passed": true,
+          "output": "STABILITY.md                                     |  5 +++++\n docs/guarantee.md                                | 18 ++++++++++++++++++\n packages/turnstile-cli/src/turnstile_cli/main.py |  5 ++++-\n 3 files changed, 27 insertions(+), 1 deletion(-)",
+          "exit_code": 0,
+          "message": "Summary of changes",
+          "severity": "info",
+          "error": "",
+          "elapsed_ms": 6
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "from": "review",
+      "to": "done",
+      "at": "2026-07-07T12:00:36.700697+00:00",
+      "triggered_by": "",
+      "role": "",
+      "session_id": "poc-session",
+      "validations": [],
+      "metadata": {}
+    }
+  ],
+  "overrides": [],
+  "status": "completed",
+  "parent_instance_id": null,
+  "parent_state_id": null,
+  "child_instance_id": null,
+  "suspended": false,
+  "waiting": false,
+  "signal_data": null
+}

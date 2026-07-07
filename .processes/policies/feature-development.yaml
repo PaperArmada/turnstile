@@ -1,0 +1,12 @@
+# Acceptance policy for this repo's own feature-development runs.
+# Verify the latest run:
+#   turnstile verify --policy .processes/policies/feature-development.yaml \
+#     --range origin/main..HEAD
+process: feature-development
+required_states: [understand, implement, test, review, done]
+require_completed: true
+allow_skips: false
+# Re-run the test state's exit gates (the full suite) at acceptance:
+reverify:
+  - {state: test, hook: on_exit}
+enforce_binding: true

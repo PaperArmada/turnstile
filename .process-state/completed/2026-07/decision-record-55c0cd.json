@@ -1,0 +1,123 @@
+{
+  "instance_id": "55c0cd",
+  "process_name": "decision-record",
+  "process_version": "1.0.0",
+  "definition_hash": "sha256:2d634fe7c26e",
+  "parameters": {
+    "decision_title": "Product strategy: acceptance-time workflow conformance",
+    "output_file": "docs/strategy.md",
+    "domain": "strategy"
+  },
+  "current_state": "decided",
+  "started_at": "2026-07-07T06:55:24.888208+00:00",
+  "updated_at": "2026-07-07T06:56:27.953262+00:00",
+  "started_by": "",
+  "history": [
+    {
+      "from": "start",
+      "to": "frame",
+      "at": "2026-07-07T06:55:24.892506+00:00",
+      "triggered_by": "",
+      "role": "",
+      "session_id": "strategy-session",
+      "validations": [
+        {
+          "command": "echo 'Domain: strategy'",
+          "expect": "not_empty",
+          "passed": true,
+          "output": "Domain: strategy",
+          "exit_code": 0,
+          "message": "Decision domain context",
+          "severity": "info",
+          "error": "",
+          "elapsed_ms": 2
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "from": "frame",
+      "to": "gather",
+      "at": "2026-07-07T06:55:24.893145+00:00",
+      "triggered_by": "",
+      "role": "",
+      "session_id": "strategy-session",
+      "validations": [],
+      "metadata": {}
+    },
+    {
+      "from": "gather",
+      "to": "evaluate",
+      "at": "2026-07-07T06:55:24.893603+00:00",
+      "triggered_by": "",
+      "role": "",
+      "session_id": "strategy-session",
+      "validations": [],
+      "metadata": {}
+    },
+    {
+      "from": "evaluate",
+      "to": "decide",
+      "at": "2026-07-07T06:55:24.898510+00:00",
+      "triggered_by": "",
+      "role": "",
+      "session_id": "strategy-session",
+      "validations": [
+        {
+          "command": "test 'docs/strategy.md' = 'none' && echo skip || (grep -qi 'option' 'docs/strategy.md' 2>/dev/null && echo found || echo missing)",
+          "expect": "not_equals(\"missing\")",
+          "passed": false,
+          "output": "missing",
+          "exit_code": 0,
+          "message": "Options should be documented before deciding",
+          "severity": "warning",
+          "error": "",
+          "elapsed_ms": 4
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "from": "decide",
+      "to": "communicate",
+      "at": "2026-07-07T06:56:27.952481+00:00",
+      "triggered_by": "",
+      "role": "",
+      "session_id": "strategy-session",
+      "validations": [
+        {
+          "command": "test 'docs/strategy.md' = 'none' && echo skip || (grep -qiE 'decision|rationale|chose|selected' 'docs/strategy.md' 2>/dev/null && echo found || echo missing)",
+          "expect": "not_equals(\"missing\")",
+          "passed": true,
+          "output": "found",
+          "exit_code": 0,
+          "message": "Decision and rationale should be documented",
+          "severity": "warning",
+          "error": "",
+          "elapsed_ms": 6
+        }
+      ],
+      "metadata": {
+        "artifact": "docs/strategy.md"
+      }
+    },
+    {
+      "from": "communicate",
+      "to": "decided",
+      "at": "2026-07-07T06:56:27.953227+00:00",
+      "triggered_by": "",
+      "role": "",
+      "session_id": "strategy-session",
+      "validations": [],
+      "metadata": {}
+    }
+  ],
+  "overrides": [],
+  "status": "completed",
+  "parent_instance_id": null,
+  "parent_state_id": null,
+  "child_instance_id": null,
+  "suspended": false,
+  "waiting": false,
+  "signal_data": null
+}

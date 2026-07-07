@@ -602,9 +602,17 @@ def init(
             )
         created.append(f".claude/settings.json ({enforce_mode} mode)")
 
-    # .gitignore additions
+    # .gitignore additions. In-flight state and the text log are
+    # ephemeral; the completed/abandoned ledger is deliberately NOT
+    # ignored — it is the audit record acceptance verification reads
+    # in CI (docs/verification.md).
     gitignore_path = root / ".gitignore"
-    gitignore_entries = [".mcp.json", ".claude/settings.json", ".process-state/"]
+    gitignore_entries = [
+        ".mcp.json",
+        ".claude/settings.json",
+        ".process-state/active/",
+        ".process-state/log.txt",
+    ]
     if gitignore_path.exists():
         existing = gitignore_path.read_text()
     else:

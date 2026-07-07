@@ -31,12 +31,49 @@ inputs:
     description: 'Turnstile git ref to install the CLI from.'
     required: false
     default: 'main'
+  require-pr-approval:
+    description: >-
+      Require an APPROVED review on this PR from someone other than the
+      PR author. This is the GitHub-native human gate: reviewer
+      identity comes from GitHub authentication, which the agent cannot
+      spoof. Use alongside (or instead of) HMAC-signed signals.
+    required: false
+    default: 'false'
 
 runs:
   using: 'composite'
   steps:
     - name: Install uv
       uses: astral-sh/setup-uv@v5
+
+    - name: Require human PR approval
+      if: inputs.require-pr-approval == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        REPO: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        if [ -z "${PR_NUMBER:-}" ]; then
+          echo "require-pr-approval is set but this is not a pull_request event" >&2
+          exit 1
+        fi
+        APPROVERS=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}/reviews" \
+          --jq "[.[] | select(.state == \"APPROVED\") | .user.login] | unique | .[]" \
+          | grep -vx "$PR_AUTHOR" || true)
+        if [ -z "$APPROVERS" ]; then
+          echo "HUMAN GATE FAILED: no APPROVED review from anyone other than the PR author (${PR_AUTHOR})." >&2
+          echo "## :x: Turnstile: human approval missing" >> "$GITHUB_STEP_SUMMARY"
+          echo "No APPROVED review from anyone other than \`${PR_AUTHOR}\`." >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+        fi
+        echo "Human approval present from: $APPROVERS"
+        {
+          echo "### :bust_in_silhouette: Human approval"
+          echo "APPROVED review(s) from: $(echo "$APPROVERS" | tr '\n' ' ')"
+        } >> "$GITHUB_STEP_SUMMARY"
 
     - name: Run turnstile verify
       shell: bash

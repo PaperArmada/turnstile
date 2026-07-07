@@ -49,6 +49,7 @@ For the full walkthrough (writing a process, driving it from an agent, and skipp
 - **A CLI** for validation, dry-run simulation, Mermaid diagrams, JSON Schema export, CI integration, git hooks, and enforcement management.
 - **Built-in starter processes** including general-purpose (`peer-review`, `decision-record`, `scientific-method`) and developer-oriented (`feature-development`, `bug-fix`, `release`, `spike`, `code-review`).
 - **Enforcement modes** (`off`, `monitor`, `enforce`) wired into Claude Code via PreToolUse hooks.
+- **Acceptance verification** (experimental): `turnstile verify` as a required CI check — gates re-executed, trail anchored and tamper-evident, commits bound to the process, human approvals authenticated. [The guarantee](docs/guarantee.md): unverified work cannot land.
 - **Process inheritance and shared packages** for reusing definitions across projects.
 
 Full surface documented in [docs/reference.md](docs/reference.md).
