@@ -139,6 +139,25 @@ author. Reviewer identity comes from GitHub authentication — an agent
 cannot manufacture it. Use it for PR flows; use `turnstile approve`
 (HMAC) for flows that never touch a PR.
 
+`comment: 'true'` posts the full conformance report as a sticky PR
+comment (updated in place on every run), so reviewers see the trail —
+verification table, timeline, approvals, walk diagram — where they
+already look. Give the job `pull-requests: write` permission.
+
+## 6. The conformance report
+
+```bash
+turnstile report --policy .processes/policies/release.yaml --range main..HEAD -o report.md
+```
+
+`turnstile report` runs the same verification as `verify` (same exit
+code — it can BE the CI check) and renders a self-contained Markdown
+document: the verification table with PROVEN/ATTESTED/HUMAN statuses,
+the transition timeline with gate counts and commit SHAs, exceptions
+with reasons, approvals with signer identity, and a Mermaid diagram of
+the walk. Use it for PR comments, CI summaries, or compliance
+archives.
+
 Then make the check required: repository settings → branch protection
 on the default branch → require the `turnstile` job, disallow direct
 pushes. That is the turnstile. `turnstile doctor` will confirm.

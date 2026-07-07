@@ -134,12 +134,16 @@ Phase 1 is complete. All shipped items are experimental surface (see
 
 **Phase 2 — put the proof where decisions happen**
 
-5. GitHub Action + PR check/comment rendering the trail: states
-   walked, gates passed, exceptions and who authorized them. The
-   trust artifact must live where reviewers already look, not in
+1. ✅ `turnstile report` — exportable Markdown conformance record
+   (verification table, timeline, exceptions, approvals, walk
+   diagram); same exit code as `verify`, so it can be the CI check
+   itself.
+2. ✅ GitHub Action renders the report into the step summary and,
+   with `comment: 'true'`, as a sticky PR comment — the trust
+   artifact lives where reviewers already look, not in
    `.process-state/`.
-6. `turnstile report` — exportable Markdown/HTML conformance record
-   (the compliance-evidence story for regulated domains).
+
+Phase 2 is complete (experimental surface).
 
 **Phase 3 — meet users where they already are**
 

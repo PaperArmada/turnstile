@@ -68,6 +68,7 @@ cli.add_command(enforcement.enforce)
 
 # Acceptance verification (experimental)
 cli.add_command(verification.verify)
+cli.add_command(verification.report)
 cli.add_command(verification.approve)
 cli.add_command(doctor.doctor)
 

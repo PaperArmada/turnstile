@@ -12,6 +12,8 @@ import click
 import yaml
 
 from turnstile_core.definition.loader import load_registry
+from turnstile_core.instance import StateStore
+from turnstile_core.ops.report import render_markdown
 from turnstile_core.ops.verify import (
     AcceptancePolicy,
     latest_instance_id,
@@ -44,6 +46,35 @@ def _resolve_key_file(root: Path, explicit: str | None) -> Path | None:
     return None
 
 
+def _load_policy(ctx: click.Context, policy_file: str) -> tuple[Path, AcceptancePolicy]:
+    """Load a policy and fill blanks from registry verification settings."""
+    policy = AcceptancePolicy(**yaml.safe_load(Path(policy_file).read_text()))
+    root = project_root(ctx)
+    v = load_registry(root).settings.verification
+    if not policy.anchor_file and v.anchor_file:
+        policy.anchor_file = str(Path(v.anchor_file).expanduser())
+    if not policy.signal_key_file and v.signal_key_file:
+        policy.signal_key_file = str(Path(v.signal_key_file).expanduser())
+    return root, policy
+
+
+def _resolve_instance(
+    root: Path, policy: AcceptancePolicy, instance_id: str | None,
+    announce: bool = True,
+) -> str:
+    if instance_id is not None:
+        return instance_id
+    found = latest_instance_id(root, policy.process)
+    if found is None:
+        click.echo(
+            f"No completed instance of '{policy.process}' found.", err=True
+        )
+        raise SystemExit(1)
+    if announce:
+        click.echo(f"(verifying latest completed instance: {found})", err=True)
+    return found
+
+
 @click.command()
 @click.argument("instance_id", required=False, default=None)
 @click.option(
@@ -73,24 +104,8 @@ def verify(
     If INSTANCE_ID is omitted, verifies the most recently completed
     instance of the policy's process.
     """
-    policy = AcceptancePolicy(**yaml.safe_load(Path(policy_file).read_text()))
-    root = project_root(ctx)
-
-    # Fill policy blanks from registry verification settings
-    v = load_registry(root).settings.verification
-    if not policy.anchor_file and v.anchor_file:
-        policy.anchor_file = str(Path(v.anchor_file).expanduser())
-    if not policy.signal_key_file and v.signal_key_file:
-        policy.signal_key_file = str(Path(v.signal_key_file).expanduser())
-
-    if instance_id is None:
-        instance_id = latest_instance_id(root, policy.process)
-        if instance_id is None:
-            click.echo(
-                f"No completed instance of '{policy.process}' found.", err=True
-            )
-            raise SystemExit(1)
-        click.echo(f"(verifying latest completed instance: {instance_id})")
+    root, policy = _load_policy(ctx, policy_file)
+    instance_id = _resolve_instance(root, policy, instance_id)
 
     report = asyncio.run(
         verify_instance(root, instance_id, policy, commit_range=commit_range)
@@ -102,6 +117,56 @@ def verify(
         click.echo(report.render())
 
     raise SystemExit(0 if report.passed else 1)
+
+
+@click.command()
+@click.argument("instance_id", required=False, default=None)
+@click.option(
+    "--policy", "policy_file", required=True, type=click.Path(exists=True),
+    help="Acceptance policy YAML.",
+)
+@click.option(
+    "--range", "commit_range", default=None,
+    help="Git commit range to bind (e.g. main..HEAD).",
+)
+@click.option(
+    "--output", "-o", "output_file", default=None, type=click.Path(),
+    help="Write the report to a file instead of stdout.",
+)
+@click.pass_context
+def report(
+    ctx: click.Context,
+    instance_id: str | None,
+    policy_file: str,
+    commit_range: str | None,
+    output_file: str | None,
+) -> None:
+    """EXPERIMENTAL: render a Markdown conformance report.
+
+    Runs the same verification as `turnstile verify`, then renders the
+    result plus the instance trail (timeline, exceptions, approvals,
+    walk diagram) as a self-contained Markdown document — for PR
+    comments, CI summaries, or compliance archives.
+
+    Exits 0/1 by the verification outcome, so it can BE the CI check.
+    """
+    root, policy = _load_policy(ctx, policy_file)
+    instance_id = _resolve_instance(root, policy, instance_id)
+
+    result = asyncio.run(
+        verify_instance(root, instance_id, policy, commit_range=commit_range)
+    )
+    state_dir = load_registry(root).settings.state_dir
+    instance = StateStore(root / state_dir).load_any(instance_id)
+    markdown = render_markdown(instance, result, commit_range=commit_range)
+
+    if output_file:
+        Path(output_file).write_text(markdown)
+        click.echo(f"Report written to {output_file}", err=True)
+    else:
+        click.echo(markdown)
+
+    raise SystemExit(0 if result.passed else 1)
 
 
 @click.command()

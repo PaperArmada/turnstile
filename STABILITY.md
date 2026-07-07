@@ -63,7 +63,8 @@ These ship and work, but may evolve before 1.0. Breaking changes are possible wi
 - `add_states`, `patch_states`, `parameters.append` operations under `overrides`
 
 **Acceptance verification**
-- `turnstile verify`, `turnstile approve`, `turnstile doctor`, the
+- `turnstile verify`, `turnstile report`, `turnstile approve`,
+  `turnstile doctor`, the
   acceptance-policy YAML shape, `settings.verification` in
   registry.yaml, the GitHub Action (`action.yml`), and the
   `turnstile_core.ops.verify` / `instance.trail` modules (hash chain,
