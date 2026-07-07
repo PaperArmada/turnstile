@@ -3,20 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
-
-from turnstile_core.models import (
+from turnstile_core.definition.expect import build_checker
+from turnstile_core.definition.model import (
     CompositeValidation,
     Severity,
     ValidationEntry,
     ValidationRule,
-    parse_expect,
 )
+from turnstile_core.templating import substitute_params
 
 
 @dataclass
@@ -32,102 +29,6 @@ class ValidationResult:
     severity: Severity = Severity.error
     error: str = ""
     elapsed_ms: int = 0
-
-
-# ---------------------------------------------------------------------------
-# Expression checkers
-# ---------------------------------------------------------------------------
-
-
-def build_checker(expr: str) -> Callable[[str, int], bool]:
-    """Parse an expect expression and return a checker function.
-
-    The checker takes (stdout_stripped, exit_code) and returns bool.
-    """
-    parsed = parse_expect(expr)
-    t = parsed["type"]
-
-    if t == "empty":
-        return lambda out, _ec: out == ""
-    if t == "not_empty":
-        return lambda out, _ec: out != ""
-    if t == "equals":
-        val = parsed["value"]
-        return lambda out, _ec: out == val
-    if t == "not_equals":
-        val = parsed["value"]
-        return lambda out, _ec: out != val
-    if t == "contains":
-        val = parsed["value"]
-        return lambda out, _ec: val in out
-    if t == "starts_with":
-        val = parsed["value"]
-        return lambda out, _ec: out.startswith(val)
-    if t == "ends_with":
-        val = parsed["value"]
-        return lambda out, _ec: out.endswith(val)
-    if t == "matches":
-        pattern = re.compile(parsed["value"])
-        return lambda out, _ec: pattern.search(out) is not None
-    if t == "greater_than":
-        val = parsed["value"]
-        return lambda out, _ec: _try_int(out) is not None and _try_int(out) > val
-    if t == "less_than":
-        val = parsed["value"]
-        return lambda out, _ec: _try_int(out) is not None and _try_int(out) < val
-    if t == "exit_code":
-        val = parsed["value"]
-        return lambda _out, ec: ec == val
-    if t == "is_json":
-        return lambda out, _ec: _is_valid_json(out)
-    if t == "is_json_object":
-        return lambda out, _ec: _is_json_type(out, dict)
-    if t == "is_json_array":
-        return lambda out, _ec: _is_json_type(out, list)
-    if t == "matches_regex":
-        pattern = re.compile(parsed["value"])
-        return lambda out, _ec: pattern.fullmatch(out) is not None
-
-    raise ValueError(f"Unknown expression type: {t}")
-
-
-def _try_int(s: str) -> int | None:
-    """Try to parse a string as an integer, return None on failure."""
-    try:
-        return int(s.strip())
-    except (ValueError, TypeError):
-        return None
-
-
-def _is_valid_json(s: str) -> bool:
-    """Check if a string is valid JSON."""
-    try:
-        json.loads(s)
-        return True
-    except (json.JSONDecodeError, ValueError):
-        return False
-
-
-def _is_json_type(s: str, expected_type: type) -> bool:
-    """Check if a string is valid JSON and the parsed value is the expected type."""
-    try:
-        parsed = json.loads(s)
-        return isinstance(parsed, expected_type)
-    except (json.JSONDecodeError, ValueError):
-        return False
-
-
-# ---------------------------------------------------------------------------
-# Parameter substitution
-# ---------------------------------------------------------------------------
-
-
-def substitute_params(command: str, parameters: dict[str, str]) -> str:
-    """Replace ${var_name} placeholders in a command string."""
-    result = command
-    for key, value in parameters.items():
-        result = result.replace(f"${{{key}}}", str(value))
-    return result
 
 
 # ---------------------------------------------------------------------------

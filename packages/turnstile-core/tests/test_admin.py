@@ -1,18 +1,18 @@
-"""Tests for turnstile_core.admin (graph generation, dry run)."""
+"""Tests for turnstile_core.definition.analysis (graph generation, dry run)."""
 
 import shutil
 from pathlib import Path
 
 import pytest
 
-from turnstile_core.admin import (
+from turnstile_core.definition.analysis import (
     check_migration,
     diff_definitions,
     generate_mermaid,
     simulate_dry_run,
 )
-from turnstile_core.engine import Engine
-from turnstile_core.loader import load_definition
+from turnstile_core.runtime.engine import Engine
+from turnstile_core.definition.loader import load_definition
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

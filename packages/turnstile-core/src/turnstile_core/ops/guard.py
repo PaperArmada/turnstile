@@ -14,8 +14,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from turnstile_core.enforcement import EnforcementResult, check_enforcement
-from turnstile_core.loader import load_registry
+from turnstile_core.ops.enforcement import EnforcementResult, check_enforcement
+from turnstile_core.definition.loader import load_registry
 
 
 def _find_turnstile_root() -> str:

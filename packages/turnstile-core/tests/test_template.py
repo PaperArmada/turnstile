@@ -1,8 +1,8 @@
-"""Tests for turnstile_core.template (package scaffolding)."""
+"""Tests for turnstile_core.ops.scaffold (package scaffolding)."""
 
 from pathlib import Path
 
-from turnstile_core.template import scaffold_package
+from turnstile_core.ops.scaffold import scaffold_package
 
 
 class TestScaffoldPackage:

@@ -19,7 +19,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from turnstile_core.engine import Engine
+from turnstile_core.runtime.engine import Engine
 from turnstile_core.errors import TransitionError
 
 

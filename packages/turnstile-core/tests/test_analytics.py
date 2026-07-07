@@ -1,11 +1,11 @@
-"""Tests for turnstile_core.analytics."""
+"""Tests for turnstile_core.instance.analytics."""
 
 import shutil
 from pathlib import Path
 
 import pytest
 
-from turnstile_core.engine import Engine
+from turnstile_core.runtime.engine import Engine
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

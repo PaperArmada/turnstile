@@ -1,12 +1,12 @@
-"""Tests for turnstile_core.notifications."""
+"""Tests for turnstile_core.runtime.notifications."""
 
 import shutil
 from pathlib import Path
 
 import pytest
 
-from turnstile_core.engine import Engine
-from turnstile_core.notifications import fire_notification, run_notification
+from turnstile_core.runtime.engine import Engine
+from turnstile_core.runtime.notifications import fire_notification, run_notification
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

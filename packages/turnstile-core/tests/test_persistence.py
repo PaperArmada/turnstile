@@ -1,11 +1,11 @@
-"""Tests for turnstile_core.persistence."""
+"""Tests for turnstile_core.instance."""
 
 import json
 
 import pytest
 
 from turnstile_core.errors import InstanceNotFoundError
-from turnstile_core.persistence import HistoryEntry, ProcessInstance, StateStore
+from turnstile_core.instance import HistoryEntry, ProcessInstance, StateStore
 
 
 class TestStateStore:

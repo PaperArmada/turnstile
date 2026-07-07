@@ -10,9 +10,9 @@ from pathlib import Path
 import yaml
 
 from turnstile_core.errors import DefinitionError, InheritanceError, ProcessNotFoundError
-from turnstile_core.inheritance import resolve_inheritance
-from turnstile_core.models import ProcessDefinition, ProcessOverride, RegistryConfig
-from turnstile_core.registry import SourceType, load_extended_definitions
+from turnstile_core.definition.inheritance import resolve_inheritance
+from turnstile_core.definition.model import ProcessDefinition, ProcessOverride, RegistryConfig
+from turnstile_core.definition.registry import SourceType, load_extended_definitions
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +100,7 @@ def load_override(path: Path) -> ProcessOverride:
         raise DefinitionError(f"Invalid override in {path}: {e}") from e
 
 
-def _is_override_file(path: Path) -> bool:
+def is_override_file(path: Path) -> bool:
     """Check if a YAML file is an override.
 
     Overrides have both an 'extends' key and an 'overrides' block.
@@ -285,7 +285,7 @@ def _discover_all(project_root: Path) -> dict[str, DiscoveredDefinition]:
                     f"Local process '{name}' listed in registry but "
                     f"file not found: {path}"
                 )
-            if _is_override_file(path):
+            if is_override_file(path):
                 local_override_paths.append(path)
                 continue
             defn = load_definition(path)
@@ -305,7 +305,7 @@ def _discover_all(project_root: Path) -> dict[str, DiscoveredDefinition]:
         for path in sorted(processes_dir.glob("*.yaml")):
             if path.name == "registry.yaml":
                 continue
-            if _is_override_file(path):
+            if is_override_file(path):
                 local_override_paths.append(path)
                 continue
             defn = load_definition(path)

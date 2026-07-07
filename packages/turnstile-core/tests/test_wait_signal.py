@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from turnstile_core.engine import Engine
+from turnstile_core.runtime.engine import Engine
 from turnstile_core.errors import TransitionError
-from turnstile_core.models import (
+from turnstile_core.definition.model import (
     ProcessState,
     SignalField,
     SignalSpec,

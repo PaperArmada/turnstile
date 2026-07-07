@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from turnstile_core.models import ProcessDefinition, RegistryConfig
+from turnstile_core.definition.model import ProcessDefinition, RegistryConfig
 
 
 def process_definition_schema() -> dict[str, Any]:

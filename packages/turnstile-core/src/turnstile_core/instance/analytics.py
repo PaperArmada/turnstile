@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Any
 
-from turnstile_core.persistence import ProcessInstance, StateStore
+from turnstile_core.instance import ProcessInstance, StateStore
 
 
 def _parse_iso(ts: str) -> datetime:

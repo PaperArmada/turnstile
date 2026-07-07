@@ -1,4 +1,4 @@
-"""Tests for turnstile_core.registry (source resolution)."""
+"""Tests for turnstile_core.definition.registry (source resolution)."""
 
 import subprocess
 from pathlib import Path
@@ -8,8 +8,8 @@ import pytest
 import yaml
 
 from turnstile_core.errors import RegistryResolutionError
-from turnstile_core.models import RegistryExtend
-from turnstile_core.registry import (
+from turnstile_core.definition.model import RegistryExtend
+from turnstile_core.definition.registry import (
     SourceType,
     parse_source,
     resolve_source,
@@ -114,7 +114,7 @@ class TestResolveLocal:
 
 
 class TestResolveGit:
-    @patch("turnstile_core.registry.subprocess.run")
+    @patch("turnstile_core.definition.registry.subprocess.run")
     def test_clone_new_repo(self, mock_run, tmp_path):
         cache_dir = tmp_path / "cache"
         url = "https://github.com/org/lib.git"
@@ -129,7 +129,7 @@ class TestResolveGit:
         assert "--branch" in args
         assert "v1.0" in args
 
-    @patch("turnstile_core.registry.subprocess.run")
+    @patch("turnstile_core.definition.registry.subprocess.run")
     def test_fetch_existing_repo(self, mock_run, tmp_path):
         cache_dir = tmp_path / "cache"
         url = "https://github.com/org/lib.git"
@@ -144,7 +144,7 @@ class TestResolveGit:
         # Should have called git fetch + git checkout
         assert mock_run.call_count == 2
 
-    @patch("turnstile_core.registry.subprocess.run")
+    @patch("turnstile_core.definition.registry.subprocess.run")
     def test_clone_failure_raises(self, mock_run, tmp_path):
         mock_run.side_effect = subprocess.CalledProcessError(
             128, "git", stderr="fatal: repository not found"
@@ -157,13 +157,13 @@ class TestResolveGit:
     def test_git_not_installed(self, tmp_path):
         cache_dir = tmp_path / "cache"
         with patch(
-            "turnstile_core.registry.subprocess.run",
+            "turnstile_core.definition.registry.subprocess.run",
             side_effect=FileNotFoundError("git not found"),
         ):
             with pytest.raises(RegistryResolutionError, match="git is not installed"):
                 _resolve_git("https://any.url/repo.git", "main", cache_dir)
 
-    @patch("turnstile_core.registry.subprocess.run")
+    @patch("turnstile_core.definition.registry.subprocess.run")
     def test_processes_subdir_preferred(self, mock_run, tmp_path):
         cache_dir = tmp_path / "cache"
         url = "https://github.com/org/lib.git"
@@ -195,13 +195,13 @@ class TestResolvePython:
         fake_module = MagicMock()
         fake_module.__file__ = str(pkg_dir / "__init__.py")
 
-        with patch("turnstile_core.registry.importlib.metadata.entry_points", return_value=[]):
+        with patch("turnstile_core.definition.registry.importlib.metadata.entry_points", return_value=[]):
             with patch("builtins.__import__", return_value=fake_module):
                 result = _resolve_python("fake-pkg")
                 assert result == proc_dir
 
     def test_package_not_found(self):
-        with patch("turnstile_core.registry.importlib.metadata.entry_points", return_value=[]):
+        with patch("turnstile_core.definition.registry.importlib.metadata.entry_points", return_value=[]):
             with patch("builtins.__import__", side_effect=ImportError):
                 with pytest.raises(RegistryResolutionError, match="not found"):
                     _resolve_python("nonexistent-package")
@@ -220,7 +220,7 @@ class TestResolveSource:
         result_path, result_type = resolve_source(extend, tmp_path, tmp_path / "cache")
         assert result_type == SourceType.local
 
-    @patch("turnstile_core.registry._resolve_git")
+    @patch("turnstile_core.definition.registry._resolve_git")
     def test_git_source(self, mock_git, tmp_path):
         mock_git.return_value = tmp_path
         extend = RegistryExtend(

@@ -1,4 +1,4 @@
-"""Tests for turnstile_core.guard and turnstile_core.enforcement."""
+"""Tests for turnstile_core.ops.guard and turnstile_core.ops.enforcement."""
 
 import json
 import shutil
@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from turnstile_core.engine import Engine
-from turnstile_core.enforcement import check_enforcement
-from turnstile_core.guard import (
+from turnstile_core.runtime.engine import Engine
+from turnstile_core.ops.enforcement import check_enforcement
+from turnstile_core.ops.guard import (
     generate_hook_config,
     install_enforcement,
     update_registry_enforcement,
@@ -610,7 +610,7 @@ class TestRunGuard:
         import io
         monkeypatch.setattr("sys.stdin", io.StringIO(hook_input))
 
-        from turnstile_core.guard import run_guard
+        from turnstile_core.ops.guard import run_guard
         run_guard()
 
         captured = capsys.readouterr()
@@ -631,7 +631,7 @@ class TestRunGuard:
         import io
         monkeypatch.setattr("sys.stdin", io.StringIO(hook_input))
 
-        from turnstile_core.guard import run_guard
+        from turnstile_core.ops.guard import run_guard
         run_guard()
 
         captured = capsys.readouterr()
@@ -641,7 +641,7 @@ class TestRunGuard:
         import io
         monkeypatch.setattr("sys.stdin", io.StringIO("not json"))
 
-        from turnstile_core.guard import run_guard
+        from turnstile_core.ops.guard import run_guard
         run_guard()
 
         captured = capsys.readouterr()
@@ -651,7 +651,7 @@ class TestRunGuard:
         import io
         monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({})))
 
-        from turnstile_core.guard import run_guard
+        from turnstile_core.ops.guard import run_guard
         run_guard()
 
         captured = capsys.readouterr()
@@ -672,7 +672,7 @@ class TestRunGuard:
         import io
         monkeypatch.setattr("sys.stdin", io.StringIO(hook_input))
 
-        from turnstile_core.guard import run_guard
+        from turnstile_core.ops.guard import run_guard
         run_guard()
 
         captured = capsys.readouterr()
