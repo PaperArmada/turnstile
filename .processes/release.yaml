@@ -1,6 +1,6 @@
 name: release
 description: "Prepare, validate, and ship a versioned release"
-version: "1.1.0"
+version: "1.2.0"
 
 metadata:
   author: "turnstile"
@@ -28,6 +28,9 @@ states:
     description: "Review what will be in this release"
     permissions:
       edit: false
+      # Nothing ships before validation: publishing commands are
+      # blocked until the tag state.
+      deny_commands: ["git push*", "git tag *", "gh release*", "*publish*"]
     transitions: [validate]
     on_enter:
       validate:
@@ -50,6 +53,7 @@ states:
     description: "Run the full test suite and any pre-release checks"
     permissions:
       edit: false
+      deny_commands: ["git push*", "git tag *", "gh release*", "*publish*"]
     transitions: [tag, prepare]
     on_exit:
       validate:

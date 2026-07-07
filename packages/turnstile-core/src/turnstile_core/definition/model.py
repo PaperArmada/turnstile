@@ -185,10 +185,19 @@ class StatePermissions(BaseModel):
     edit_paths restricts which files may be edited when edit is True.
     Uses glob patterns relative to the project root (e.g. "src/**").
     Empty list means all paths are allowed.
+
+    Command execution is governed the same way: ``run`` gates shell
+    commands wholesale; ``deny_commands`` blocks matching commands
+    even when run is True; ``allow_commands``, if non-empty, permits
+    only matching commands. Patterns are fnmatch globs tested against
+    the full command string (e.g. "git push*", "*deploy*").
     """
 
     edit: bool = True
     edit_paths: list[str] = Field(default_factory=list)
+    run: bool = True
+    allow_commands: list[str] = Field(default_factory=list)
+    deny_commands: list[str] = Field(default_factory=list)
 
 
 class ProcessState(BaseModel):

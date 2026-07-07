@@ -98,14 +98,24 @@ def run_guard() -> None:
         if not cwd:
             return
 
-        # Extract file path from tool input for contextual suggestions
+        tool_name = hook_input.get("tool_name", "")
         tool_input = hook_input.get("tool_input", {})
-        file_path = tool_input.get("file_path", "")
 
         project_root = Path(cwd)
-        result = check_enforcement(
-            project_root, action="edit", file_path=file_path
-        )
+        if tool_name == "Bash":
+            # Shell commands are governed by the state's run permission
+            # and allow/deny command patterns.
+            result = check_enforcement(
+                project_root, action="run",
+                command=tool_input.get("command", ""),
+            )
+        else:
+            # File mutations (Edit/Write/...) are governed by edit
+            # permission and edit_paths.
+            result = check_enforcement(
+                project_root, action="edit",
+                file_path=tool_input.get("file_path", ""),
+            )
         response = _to_hook_response(result, project_root)
 
         if response is not None:
@@ -167,7 +177,7 @@ def generate_hook_config(
         "hooks": {
             "PreToolUse": [
                 {
-                    "matcher": "Edit|Write",
+                    "matcher": "Edit|Write|Bash",
                     "hooks": [
                         {
                             "type": "command",

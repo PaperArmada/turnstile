@@ -325,7 +325,7 @@ Each instance is a JSON file containing the current state, full history, paramet
 
 ## Enforcement
 
-Turnstile can enforce process compliance by integrating with Claude Code's PreToolUse hooks. When enabled, file mutations (Write, Edit) are gated on having an active process instance.
+Turnstile can enforce process compliance by integrating with Claude Code's PreToolUse hooks. When enabled, file mutations (Write, Edit) and shell commands (Bash) are gated on having an active process instance whose current state permits them.
 
 Three modes:
 
@@ -350,6 +350,29 @@ turnstile enforce status
 ```
 
 Enforcement is configured in `registry.yaml` under `settings.enforcement` and works via a PreToolUse hook in `.claude/settings.json` that calls `turnstile guard`. The guard fails open on any error to avoid blocking the agent unexpectedly.
+
+### State permissions
+
+Each state declares what an agent may do while the process sits there:
+
+```yaml
+- id: prepare
+  permissions:
+    edit: false                    # block file mutations
+    edit_paths: ["src/**"]         # or restrict them to globs (when edit: true)
+    run: true                      # allow shell commands...
+    deny_commands:                 # ...except these (fnmatch globs on
+      - "git push*"                #    the full command string)
+      - "*deploy*"
+    allow_commands:                # or allow ONLY these (when non-empty)
+      - "git status*"
+      - "pytest*"
+```
+
+`deny_commands` wins over `allow_commands`. Defaults are fully
+permissive, so existing definitions are unaffected. The starter
+`release` process uses this to block `git push`/`git tag`/publishing
+until the tag state.
 
 ## Starter pack
 

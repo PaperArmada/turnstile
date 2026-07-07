@@ -187,6 +187,53 @@ def _format_guidance(contexts: list[EnforcementContext], action: str) -> str:
     return "\n".join(lines)
 
 
+def _action_allowed(permissions: StatePermissions, action: str) -> bool:
+    """Whether a state's permissions allow an action category at all."""
+    if action == "edit":
+        return permissions.edit
+    if action == "run":
+        return permissions.run
+    return True
+
+
+def _command_permitted(permissions: StatePermissions, command: str) -> str:
+    """Check a command against a context's allow/deny patterns.
+
+    Returns "" if permitted, or the reason it is blocked. Patterns are
+    fnmatch globs tested against the full command string.
+    """
+    for pattern in permissions.deny_commands:
+        if fnmatch(command, pattern):
+            return f"matches denied pattern '{pattern}'"
+    if permissions.allow_commands and not any(
+        fnmatch(command, pattern) for pattern in permissions.allow_commands
+    ):
+        return (
+            f"not in allowed patterns: "
+            f"{', '.join(permissions.allow_commands)}"
+        )
+    return ""
+
+
+def _check_command(
+    contexts: list[EnforcementContext], command: str
+) -> tuple[bool, str]:
+    """Check a command against every permitting context.
+
+    Permitted if at least one context's patterns allow it (mirroring
+    _check_edit_paths). Returns (ok, blocking_reason).
+    """
+    reasons = []
+    for ctx in contexts:
+        blocked = _command_permitted(ctx.permissions, command)
+        if not blocked:
+            return True, ""
+        reasons.append(
+            f"{ctx.process_name} @ {ctx.current_state}: {blocked}"
+        )
+    return False, "; ".join(reasons)
+
+
 def _check_edit_paths(
     contexts: list[EnforcementContext],
     file_path: str,
@@ -286,6 +333,7 @@ def check_enforcement(
     project_root: Path,
     action: str = "edit",
     file_path: str = "",
+    command: str = "",
 ) -> EnforcementResult:
     """Check whether an action is permitted given active process state.
 
@@ -294,8 +342,9 @@ def check_enforcement(
 
     Args:
         project_root: The project root directory.
-        action: The action being attempted (currently: "edit").
-        file_path: The file being acted on (for contextual suggestions).
+        action: The action being attempted ("edit" or "run").
+        file_path: The file being acted on (edit; contextual suggestions).
+        command: The shell command being attempted (run).
 
     Returns:
         EnforcementResult with decision, reason, context, and guidance.
@@ -349,14 +398,29 @@ def check_enforcement(
         )
 
     # Check the action permission on non-suspended instances.
-    # Only "edit" is governed today; unknown actions are allowed, but
+    # "edit" and "run" are governed; unknown actions are allowed, but
     # explicitly, not via a fail-open attribute lookup.
     permitted_by = [
         c for c in non_suspended
-        if c.permissions.edit or action != "edit"
+        if _action_allowed(c.permissions, action)
     ]
 
     if permitted_by:
+        # Check command restrictions if a command is provided
+        if command and action == "run":
+            cmd_ok, blocked_reason = _check_command(permitted_by, command)
+            if not cmd_ok:
+                reason = f"Command blocked: {blocked_reason}"
+                if mode == "monitor":
+                    return EnforcementResult(
+                        decision="warn", reason=reason,
+                        context=contexts, guidance=guidance,
+                    )
+                return EnforcementResult(
+                    decision="deny", reason=reason,
+                    context=contexts, guidance=guidance,
+                )
+
         # Check path restrictions if file_path is provided
         if file_path and action == "edit":
             path_ok = _check_edit_paths(permitted_by, file_path, project_root)

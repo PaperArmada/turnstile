@@ -47,6 +47,10 @@ These ship and work, but may evolve before 1.0. Breaking changes are possible wi
 - `dispatch` states and async child instances (`parameter_map`, `immediate`, `assign_to`)
 - `subprocess` states (synchronous parent-suspend pattern)
 
+**Command-level permissions**
+- `permissions.run`, `allow_commands`, `deny_commands` on states, and
+  the guard's Bash-tool routing
+
 **Multi-actor primitives**
 - `role` on states and in history entries
 - `agent_context` (`guidance`, `reference_files`, `tools`, `skill_directives`)
