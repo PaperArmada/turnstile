@@ -405,6 +405,20 @@ class RegistryExtend(BaseModel):
     processes: list[str] = Field(default_factory=list)
 
 
+class VerificationSettings(BaseModel):
+    """Settings for acceptance-time verification (docs/guarantee.md).
+
+    anchor_file / anchor_command must reference locations outside the
+    agent's write domain, or anchoring proves nothing. The command
+    receives {instance_id}, {head}, and {entries} substitutions.
+    """
+
+    record_git_sha: bool = True
+    anchor_file: str = ""
+    anchor_command: str = ""
+    signal_key_file: str = ""
+
+
 class RegistrySettings(BaseModel):
     """Global settings from registry.yaml."""
 
@@ -414,6 +428,9 @@ class RegistrySettings(BaseModel):
     notifications: dict[str, str] = Field(default_factory=dict)
     enforcement: str = "off"  # off, monitor, enforce
     path_catalogue: dict[str, list[str]] = Field(default_factory=dict)
+    verification: VerificationSettings = Field(
+        default_factory=VerificationSettings
+    )
 
     @model_validator(mode="after")
     def _validate_enforcement(self) -> RegistrySettings:

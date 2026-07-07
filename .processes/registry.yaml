@@ -16,6 +16,10 @@ settings:
   require_override_reason: true
   log_retention_days: 90
   enforcement: monitor
+  verification:
+    record_git_sha: true
+    anchor_file: ~/.turnstile/anchors.json
+    signal_key_file: ~/.turnstile/operator.key
   notifications:
     on_complete: echo '[COMPLETE] ${name} (${instance_id}) finished at ${state}' >>
       .process-state/log.txt

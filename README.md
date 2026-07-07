@@ -64,6 +64,7 @@ Turnstile is pre-1.0. The core engine (initial/normal/terminal states, validatio
 - [Architecture](docs/architecture.md) — functional core / imperative shell, the layer map, design rules
 - [Strategy](docs/strategy.md) — the product promise: unverified work cannot land
 - [The guarantee](docs/guarantee.md) — threat model: what is proven, what is attested, what is never claimed
+- [Acceptance verification](docs/verification.md) — wiring `turnstile verify` into CI as a required check
 - [Stability and versioning](STABILITY.md) — what's frozen, what may evolve
 - [Vision](docs/vision.md) — north star, identity, capability layers
 - [Design principles](docs/principles/) — progressive disclosure, render don't record, single process single document, fail open

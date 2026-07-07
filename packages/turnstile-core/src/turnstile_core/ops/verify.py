@@ -42,8 +42,21 @@ from pydantic import BaseModel, Field
 
 from turnstile_core.definition.loader import discover_definitions_full
 from turnstile_core.instance import ProcessInstance, StateStore
-from turnstile_core.instance.model import HistoryEntry
+from turnstile_core.instance.trail import compute_chain_head, write_anchor
 from turnstile_core.runtime.gates import has_blocking_failures, run_validations
+
+__all__ = [
+    "AcceptancePolicy",
+    "ReverifyGate",
+    "VerifyCheck",
+    "VerifyReport",
+    "compute_chain_head",
+    "latest_instance_id",
+    "sign_signal",
+    "signal_signature_valid",
+    "verify_instance",
+    "write_anchor",
+]
 
 CheckStatus = Literal["PROVEN", "ATTESTED", "HUMAN", "INFO", "FAIL"]
 
@@ -109,51 +122,6 @@ class VerifyReport(BaseModel):
         for c in self.checks:
             lines.append(f"  {c.status:<8} {c.name}" + (f" — {c.detail}" if c.detail else ""))
         return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# Hash chain + anchoring
-# ---------------------------------------------------------------------------
-
-
-def _canonical(entry: HistoryEntry) -> bytes:
-    return json.dumps(
-        entry.model_dump(by_alias=True), sort_keys=True, separators=(",", ":")
-    ).encode()
-
-
-def compute_chain_head(instance: ProcessInstance) -> str:
-    """Hash-chain the instance history and return the head digest.
-
-    Each entry's hash folds in the previous one, so editing, inserting,
-    or deleting any historical entry changes the head.
-    """
-    head = hashlib.sha256(
-        f"turnstile:{instance.process_name}:{instance.instance_id}".encode()
-    ).hexdigest()
-    for entry in instance.history:
-        head = hashlib.sha256((head.encode() + _canonical(entry))).hexdigest()
-    return head
-
-
-def write_anchor(anchor_path: Path, instance: ProcessInstance) -> str:
-    """Record the current chain head in the anchor file.
-
-    In production this is a remote append-only log written under a
-    credential the agent does not hold; the PoC uses a file the caller
-    keeps outside the agent's write domain. Call it on every
-    transition so the anchor is contemporaneous.
-    """
-    head = compute_chain_head(instance)
-    anchors: dict[str, Any] = {}
-    if anchor_path.exists():
-        anchors = json.loads(anchor_path.read_text())
-    anchors[instance.instance_id] = {
-        "head": head,
-        "entries": len(instance.history),
-    }
-    anchor_path.write_text(json.dumps(anchors, indent=2))
-    return head
 
 
 # ---------------------------------------------------------------------------
@@ -409,3 +377,22 @@ async def verify_instance(
             report.add("PROVEN" if ok else "FAIL", "artifact binding", detail)
 
     return report
+
+
+def latest_instance_id(
+    project_root: Path,
+    process: str,
+    state_dir: str = ".process-state",
+) -> str | None:
+    """Most recently updated completed instance of a process, if any.
+
+    Used by CI to verify "the certifying run" without threading an
+    instance ID through the pipeline.
+    """
+    store = StateStore(project_root / state_dir)
+    candidates = [
+        i for i in store.list_completed() if i.process_name == process
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda i: i.updated_at).instance_id
