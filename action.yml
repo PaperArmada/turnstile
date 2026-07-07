@@ -39,6 +39,13 @@ inputs:
       spoof. Use alongside (or instead of) HMAC-signed signals.
     required: false
     default: 'false'
+  comment:
+    description: >-
+      Post (and keep updated) the conformance report as a sticky PR
+      comment, so reviewers see the trail where they already look.
+      Requires pull-requests write permission on the job.
+    required: false
+    default: 'false'
 
 runs:
   using: 'composite'
@@ -75,7 +82,7 @@ runs:
           echo "APPROVED review(s) from: $(echo "$APPROVERS" | tr '\n' ' ')"
         } >> "$GITHUB_STEP_SUMMARY"
 
-    - name: Run turnstile verify
+    - name: Run turnstile verification report
       shell: bash
       env:
         POLICY: ${{ inputs.policy }}
@@ -84,6 +91,10 @@ runs:
         PROJECT: ${{ inputs.project }}
         TS_REF: ${{ inputs.turnstile-ref }}
         BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        DO_COMMENT: ${{ inputs.comment }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        REPO: ${{ github.repository }}
+        GH_TOKEN: ${{ github.token }}
       run: |
         set -uo pipefail
         cd "$PROJECT"
@@ -100,26 +111,36 @@ runs:
         ARGS+=(--policy "$POLICY")
         [ -n "$RANGE" ] && ARGS+=(--range "$RANGE")
 
+        # report = verify + rendering; exit code is the verification
         set +e
-        OUTPUT=$(uvx --python 3.12 \
+        REPORT=$(uvx --python 3.12 \
           --from "turnstile-cli @ git+https://github.com/PaperArmada/turnstile.git@${TS_REF}#subdirectory=packages/turnstile-cli" \
-          turnstile verify "${ARGS[@]}" 2>&1)
+          turnstile report "${ARGS[@]}" 2>/dev/null)
         CODE=$?
         set -e
 
-        echo "$OUTPUT"
-        {
-          if [ "$CODE" -eq 0 ]; then
-            echo "## :white_check_mark: Turnstile: workflow followed"
+        echo "$REPORT"
+        echo "$REPORT" >> "$GITHUB_STEP_SUMMARY"
+
+        # Sticky PR comment: update the existing turnstile comment if
+        # present, else create one.
+        if [ "$DO_COMMENT" = "true" ] && [ -n "${PR_NUMBER:-}" ]; then
+          MARKER='<!-- turnstile-conformance-report -->'
+          BODY_FILE=$(mktemp)
+          printf '%s\n\n%s\n' "$MARKER" "$REPORT" > "$BODY_FILE"
+          EXISTING=$(gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" \
+            --paginate --jq \
+            "[.[] | select(.body | startswith(\"$MARKER\")) | .id] | first" \
+            2>/dev/null || true)
+          if [ -n "$EXISTING" ] && [ "$EXISTING" != "null" ]; then
+            gh api -X PATCH "repos/${REPO}/issues/comments/${EXISTING}" \
+              -F body=@"$BODY_FILE" > /dev/null
+            echo "(updated PR comment ${EXISTING})"
           else
-            echo "## :x: Turnstile: workflow NOT verified"
+            gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" \
+              -F body=@"$BODY_FILE" > /dev/null
+            echo "(posted PR comment)"
           fi
-          echo ''
-          echo '```'
-          echo "$OUTPUT"
-          echo '```'
-          echo ''
-          echo '_What the statuses mean: **PROVEN** was recomputed in this run and does not trust the ledger; **ATTESTED** relies on the anchored, hash-chained trail; **HUMAN** is an authenticated approval. See docs/guarantee.md._'
-        } >> "$GITHUB_STEP_SUMMARY"
+        fi
 
         exit $CODE
