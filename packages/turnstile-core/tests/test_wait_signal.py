@@ -1,6 +1,5 @@
 """Tests for wait states and signal delivery."""
 
-import shutil
 from pathlib import Path
 
 import pytest
@@ -106,18 +105,13 @@ def engine(tmp_path):
 
 
 @pytest.fixture
-def waiting_instance(engine):
+async def waiting_instance(engine):
     """Create an instance already in the wait state."""
     result = engine.start("wait-test")
     iid = result["instance_id"]
 
-    import asyncio
-    loop = asyncio.new_event_loop()
-    try:
-        loop.run_until_complete(engine.transition(iid, "work"))
-        r = loop.run_until_complete(engine.transition(iid, "review"))
-    finally:
-        loop.close()
+    await engine.transition(iid, "work")
+    r = await engine.transition(iid, "review")
 
     assert r.success
     assert r.new_state == "review"
@@ -127,17 +121,12 @@ def waiting_instance(engine):
 
 
 class TestWaitTransition:
-    def test_transition_to_wait_sets_waiting(self, engine):
+    async def test_transition_to_wait_sets_waiting(self, engine):
         result = engine.start("wait-test")
         iid = result["instance_id"]
 
-        import asyncio
-        loop = asyncio.new_event_loop()
-        try:
-            loop.run_until_complete(engine.transition(iid, "work"))
-            r = loop.run_until_complete(engine.transition(iid, "review"))
-        finally:
-            loop.close()
+        await engine.transition(iid, "work")
+        r = await engine.transition(iid, "review")
 
         assert r.success
         assert r.new_state == "review"
@@ -145,18 +134,11 @@ class TestWaitTransition:
         assert r.role == "reviewer"
         assert "Waiting for signal 'review_complete'" in r.message
 
-    def test_transition_blocked_while_waiting(self, waiting_instance, engine):
-        import asyncio
-        loop = asyncio.new_event_loop()
-        try:
-            with pytest.raises(TransitionError, match="waiting for a signal"):
-                loop.run_until_complete(
-                    engine.transition(waiting_instance, "approved")
-                )
-        finally:
-            loop.close()
+    async def test_transition_blocked_while_waiting(self, waiting_instance, engine):
+        with pytest.raises(TransitionError, match="waiting for a signal"):
+            await engine.transition(waiting_instance, "approved")
 
-    def test_status_shows_waiting(self, waiting_instance, engine):
+    async def test_status_shows_waiting(self, waiting_instance, engine):
         status = engine.status(waiting_instance)
         assert status["waiting"] is True
         assert status["waiting_for_signal"] == "review_complete"
@@ -164,8 +146,8 @@ class TestWaitTransition:
 
 
 class TestSignalDelivery:
-    def test_signal_with_target(self, waiting_instance, engine):
-        result = engine.receive_signal(
+    async def test_signal_with_target(self, waiting_instance, engine):
+        result = await engine.receive_signal(
             waiting_instance, "review_complete",
             {"approved": True, "comments": "Looks good"},
             target_state="approved",
@@ -174,8 +156,8 @@ class TestSignalDelivery:
         assert result["new_state"] == "approved"
         assert result["signal_data"]["approved"] is True
 
-    def test_signal_without_target(self, waiting_instance, engine):
-        result = engine.receive_signal(
+    async def test_signal_without_target(self, waiting_instance, engine):
+        result = await engine.receive_signal(
             waiting_instance, "review_complete",
             {"approved": False, "comments": "Needs work"},
         )
@@ -183,41 +165,41 @@ class TestSignalDelivery:
         assert result["new_state"] == "review"
         assert result["available_transitions"] == ["approved", "rejected"]
 
-    def test_signal_wrong_name(self, waiting_instance, engine):
+    async def test_signal_wrong_name(self, waiting_instance, engine):
         with pytest.raises(TransitionError, match="Expected signal"):
-            engine.receive_signal(
+            await engine.receive_signal(
                 waiting_instance, "wrong_signal",
                 {"approved": True, "comments": ""},
             )
 
-    def test_signal_missing_fields(self, waiting_instance, engine):
+    async def test_signal_missing_fields(self, waiting_instance, engine):
         with pytest.raises(TransitionError, match="missing required fields"):
-            engine.receive_signal(
+            await engine.receive_signal(
                 waiting_instance, "review_complete",
                 {"approved": True},  # missing 'comments'
             )
 
-    def test_signal_invalid_target(self, waiting_instance, engine):
+    async def test_signal_invalid_target(self, waiting_instance, engine):
         with pytest.raises(TransitionError, match="not a valid transition"):
-            engine.receive_signal(
+            await engine.receive_signal(
                 waiting_instance, "review_complete",
                 {"approved": True, "comments": ""},
                 target_state="nonexistent",
             )
 
-    def test_signal_not_waiting(self, engine):
+    async def test_signal_not_waiting(self, engine):
         result = engine.start("wait-test")
         iid = result["instance_id"]
 
         with pytest.raises(TransitionError, match="not waiting"):
-            engine.receive_signal(
+            await engine.receive_signal(
                 iid, "review_complete",
                 {"approved": True, "comments": ""},
             )
 
-    def test_signal_records_history(self, waiting_instance, engine):
+    async def test_signal_records_history(self, waiting_instance, engine):
         # Signal to "rejected" (non-terminal) so we can inspect history
-        engine.receive_signal(
+        await engine.receive_signal(
             waiting_instance, "review_complete",
             {"approved": False, "comments": "Needs work"},
             target_state="rejected",
@@ -232,22 +214,28 @@ class TestSignalDelivery:
         assert last.metadata["signal_data"]["approved"] is False
         assert last.metadata["signal_data"]["comments"] == "Needs work"
 
-    def test_signal_then_transition(self, waiting_instance, engine):
+    async def test_signal_then_transition(self, waiting_instance, engine):
         """Signal without target, then normal transition."""
-        import asyncio
-        loop = asyncio.new_event_loop()
-        try:
-            # Deliver signal without target
-            engine.receive_signal(
-                waiting_instance, "review_complete",
-                {"approved": False, "comments": "Needs work"},
-            )
+        # Deliver signal without target
+        await engine.receive_signal(
+            waiting_instance, "review_complete",
+            {"approved": False, "comments": "Needs work"},
+        )
 
-            # Now normal transition should work (waiting cleared)
-            r = loop.run_until_complete(
-                engine.transition(waiting_instance, "rejected")
-            )
-            assert r.success
-            assert r.new_state == "rejected"
-        finally:
-            loop.close()
+        # Now normal transition should work (waiting cleared)
+        r = await engine.transition(waiting_instance, "rejected")
+        assert r.success
+        assert r.new_state == "rejected"
+
+    async def test_signal_to_terminal_completes(self, waiting_instance, engine):
+        """A signal targeting a terminal state completes the instance
+        with the same semantics as a normal transition (summary included)."""
+        result = await engine.receive_signal(
+            waiting_instance, "review_complete",
+            {"approved": True, "comments": "Ship it"},
+            target_state="approved",
+        )
+        assert result["new_state"] == "approved"
+        assert result["summary"]["transition_count"] >= 1
+        # Instance is archived, not active
+        assert engine.status() == []
