@@ -2,13 +2,49 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-_UNRESOLVED_TEMPLATE_RE = re.compile(r"\$\{([^}]+)\}")
+from turnstile_core.instance.analytics import compute_analytics
+from turnstile_core.definition.analysis import (
+    check_migration,
+    diff_definitions,
+    generate_mermaid,
+    simulate_dry_run,
+)
+from turnstile_core.errors import (
+    DefinitionError,
+    InstanceNotFoundError,
+    ProcessNotFoundError,
+    SubprocessError,
+    TransitionError,
+)
+from turnstile_core.definition.loader import (
+    DiscoveredDefinition,
+    definition_hash,
+    discover_definitions,
+    discover_definitions_full,
+    load_definition,
+    load_registry,
+)
+from turnstile_core.definition.model import ProcessDefinition, ProcessState, StateType
+from turnstile_core.instance import (
+    HistoryEntry,
+    OverrideEntry,
+    ProcessInstance,
+    StateStore,
+    now_iso,
+)
+from turnstile_core.runtime.notifications import fire_notification
+from turnstile_core.runtime.gates import (
+    ValidationResult,
+    has_blocking_failures,
+    run_command,
+    run_validations,
+)
+from turnstile_core.templating import substitute_params, unresolved_placeholders
 
 
 def _check_resolved(
@@ -26,55 +62,16 @@ def _check_resolved(
     error until far downstream; failing fast at dispatch time is the
     correct behavior.
     """
-    unresolved = _UNRESOLVED_TEMPLATE_RE.findall(value)
+    unresolved = unresolved_placeholders(value)
     if not unresolved:
         return
     raise SubprocessError(
         f"Dispatch to '{child_process}' has unresolved parameter(s) in "
         f"parameter_map entry '{child_key}': "
-        f"{', '.join(sorted(set(unresolved)))}. "
+        f"{', '.join(unresolved)}. "
         f"Available keys: {sorted(available.keys())}. "
         f"Pass the missing value(s) via the transition metadata argument."
     )
-
-from turnstile_core.analytics import compute_analytics
-from turnstile_core.admin import (
-    check_migration,
-    diff_definitions,
-    generate_mermaid,
-    simulate_dry_run,
-)
-from turnstile_core.errors import (
-    DefinitionError,
-    InstanceNotFoundError,
-    ProcessNotFoundError,
-    SubprocessError,
-    TransitionError,
-)
-from turnstile_core.loader import (
-    DiscoveredDefinition,
-    definition_hash,
-    discover_definitions,
-    discover_definitions_full,
-    load_definition,
-    load_registry,
-)
-from turnstile_core.models import ProcessDefinition, StateType
-from turnstile_core.persistence import (
-    HistoryEntry,
-    OverrideEntry,
-    ProcessInstance,
-    StateStore,
-    _now_iso,
-)
-from turnstile_core.notifications import fire_notification
-from turnstile_core.validator import (
-    ValidationResult,
-    has_blocking_failures,
-    run_validations,
-    substitute_params,
-    run_command,
-)
 
 
 @dataclass
@@ -515,7 +512,7 @@ class Engine:
         history_entry = HistoryEntry(**{
             "from": instance.current_state,
             "to": target_state,
-            "at": _now_iso(),
+            "at": now_iso(),
             "role": target.role,
             "session_id": session_id,
             "validations": [_vr_to_dict(r) for r in all_results],
@@ -552,7 +549,7 @@ class Engine:
             auto_entry = HistoryEntry(**{
                 "from": target_state,
                 "to": target.immediate,
-                "at": _now_iso(),
+                "at": now_iso(),
                 "triggered_by": f"dispatch: {target.process}",
                 "role": immediate_state.role,
                 "session_id": session_id,
@@ -864,14 +861,14 @@ class Engine:
         override = OverrideEntry(
             from_state=instance.current_state,
             to_state=target_state,
-            at=_now_iso(),
+            at=now_iso(),
             reason=reason,
         )
 
         history_entry = HistoryEntry(**{
             "from": instance.current_state,
             "to": target_state,
-            "at": _now_iso(),
+            "at": now_iso(),
             "triggered_by": f"skip: {reason}",
             "role": target.role,
             "session_id": session_id,
@@ -981,7 +978,7 @@ class Engine:
             history_entry = HistoryEntry(**{
                 "from": instance.current_state,
                 "to": target_state,
-                "at": _now_iso(),
+                "at": now_iso(),
                 "triggered_by": f"signal: {signal_name}",
                 "role": target.role if target else "",
                 "session_id": session_id,
@@ -1005,7 +1002,7 @@ class Engine:
                 auto_entry = HistoryEntry(**{
                     "from": target_state,
                     "to": target.immediate,
-                    "at": _now_iso(),
+                    "at": now_iso(),
                     "triggered_by": f"dispatch: {target.process}",
                     "role": immediate_state.role if immediate_state else "",
                     "session_id": session_id,

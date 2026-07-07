@@ -1,10 +1,10 @@
-"""Tests for turnstile_core.schema (JSON Schema export)."""
+"""Tests for turnstile_core.definition.schema (JSON Schema export)."""
 
 import json
 
 import pytest
 
-from turnstile_core.schema import (
+from turnstile_core.definition.schema import (
     export_schemas,
     process_definition_schema,
     registry_schema,

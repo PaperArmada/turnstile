@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import re
 from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
+
+from turnstile_core.definition.expect import parse_expect
 
 
 class Severity(str, Enum):
@@ -22,46 +23,6 @@ class StateType(str, Enum):
     subprocess = "subprocess"
     wait = "wait"
     dispatch = "dispatch"
-
-
-# ---------------------------------------------------------------------------
-# Validation expressions
-# ---------------------------------------------------------------------------
-
-# Regex patterns for parsing expect expressions
-_BARE_KEYWORDS = {"empty", "not_empty", "is_json", "is_json_object", "is_json_array"}
-_FUNC_PATTERN = re.compile(
-    r'^(equals|not_equals|contains|starts_with|ends_with|matches|matches_regex)\("(.*)"\)$'
-)
-_NUMERIC_PATTERN = re.compile(r"^(greater_than|less_than)\((\d+)\)$")
-_EXIT_CODE_PATTERN = re.compile(r"^exit_code\((\d+)\)$")
-
-
-def parse_expect(expr: str) -> dict[str, Any]:
-    """Parse an expect expression string into a structured dict.
-
-    Returns a dict with 'type' and relevant parameters. This is used
-    for serialization/inspection. The actual checking logic lives in
-    validator.py.
-    """
-    expr = expr.strip()
-
-    if expr in _BARE_KEYWORDS:
-        return {"type": expr}
-
-    m = _FUNC_PATTERN.match(expr)
-    if m:
-        return {"type": m.group(1), "value": m.group(2)}
-
-    m = _NUMERIC_PATTERN.match(expr)
-    if m:
-        return {"type": m.group(1), "value": int(m.group(2))}
-
-    m = _EXIT_CODE_PATTERN.match(expr)
-    if m:
-        return {"type": "exit_code", "value": int(m.group(1))}
-
-    raise ValueError(f"Invalid expect expression: {expr!r}")
 
 
 # ---------------------------------------------------------------------------

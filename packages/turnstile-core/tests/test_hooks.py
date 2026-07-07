@@ -1,8 +1,8 @@
-"""Tests for turnstile_core.hooks (git hook helpers)."""
+"""Tests for turnstile_core.ops.githooks (git hook helpers)."""
 
 from pathlib import Path
 
-from turnstile_core.hooks import (
+from turnstile_core.ops.githooks import (
     generate_check_snippet,
     generate_hook,
     install_hook,

@@ -1,4 +1,4 @@
-"""Tests for turnstile_core.inheritance (override resolution)."""
+"""Tests for turnstile_core.definition.inheritance (override resolution)."""
 
 from pathlib import Path
 
@@ -6,15 +6,15 @@ import pytest
 import yaml
 
 from turnstile_core.errors import InheritanceError
-from turnstile_core.inheritance import resolve_inheritance
-from turnstile_core.loader import (
+from turnstile_core.definition.inheritance import resolve_inheritance
+from turnstile_core.definition.loader import (
     DiscoveredDefinition,
     definition_hash,
     discover_definitions,
     load_definition,
     load_override,
 )
-from turnstile_core.models import (
+from turnstile_core.definition.model import (
     OverrideSpec,
     ParameterOverride,
     ProcessDefinition,

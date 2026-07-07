@@ -12,24 +12,24 @@ from pathlib import Path
 
 import click
 
-from turnstile_core.admin import generate_mermaid, simulate_dry_run
-from turnstile_core.engine import Engine
-from turnstile_core.guard import (
+from turnstile_core.definition.analysis import generate_mermaid, simulate_dry_run
+from turnstile_core.runtime.engine import Engine
+from turnstile_core.ops.guard import (
     _find_turnstile_root,
     install_enforcement,
     run_guard,
     update_registry_enforcement,
 )
-from turnstile_core.hooks import generate_hook, install_hook, uninstall_hook
-from turnstile_core.inheritance import resolve_inheritance
-from turnstile_core.loader import (
-    _is_override_file,
+from turnstile_core.ops.githooks import generate_hook, install_hook, uninstall_hook
+from turnstile_core.definition.inheritance import resolve_inheritance
+from turnstile_core.definition.loader import (
+    is_override_file,
     load_definition,
     load_override,
     load_registry,
 )
-from turnstile_core.schema import export_schemas
-from turnstile_core.template import scaffold_package
+from turnstile_core.definition.schema import export_schemas
+from turnstile_core.ops.scaffold import scaffold_package
 
 from turnstile_cli.principles import PRINCIPLES
 
@@ -102,9 +102,9 @@ def cli(ctx: click.Context, project: str | None) -> None:
 
 def _load_definition_or_override(path: Path) -> "ProcessDefinition":
     """Load a YAML file as either a definition or an override with inheritance."""
-    from turnstile_core.models import ProcessDefinition
+    from turnstile_core.definition.model import ProcessDefinition
 
-    if _is_override_file(path):
+    if is_override_file(path):
         override = load_override(path)
         parent_name = override.extends.rsplit("/", 1)[-1]
         parent_path = path.parent / f"{parent_name}.yaml"
@@ -1125,7 +1125,7 @@ def init(
         proc_dir = root / ".processes"
         proc_table = ""
         if proc_dir.exists():
-            from turnstile_core.loader import discover_definitions_full
+            from turnstile_core.definition.loader import discover_definitions_full
             discovered = discover_definitions_full(root)
             if discovered:
                 rows = []

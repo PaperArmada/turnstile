@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from turnstile_core.engine import Engine
+from turnstile_core.runtime.engine import Engine
 from turnstile_core.errors import SubprocessError, TransitionError
-from turnstile_core.loader import load_definition
-from turnstile_core.models import (
+from turnstile_core.definition.loader import load_definition
+from turnstile_core.definition.model import (
     ProcessState,
     SkillDirective,
     StateType,

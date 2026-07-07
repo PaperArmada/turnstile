@@ -1,4 +1,4 @@
-"""Tests for turnstile_core.loader."""
+"""Tests for turnstile_core.definition.loader."""
 
 from pathlib import Path
 
@@ -6,7 +6,7 @@ import pytest
 import yaml
 
 from turnstile_core.errors import DefinitionError, ProcessNotFoundError
-from turnstile_core.loader import (
+from turnstile_core.definition.loader import (
     DiscoveredDefinition,
     definition_hash,
     discover_definitions,

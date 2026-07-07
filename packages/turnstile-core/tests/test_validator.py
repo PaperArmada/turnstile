@@ -1,12 +1,12 @@
-"""Tests for turnstile_core.validator."""
+"""Tests for turnstile_core.runtime.gates."""
 
 import time
 from pathlib import Path
 
 import pytest
 
-from turnstile_core.models import CompositeValidation, Severity, ValidationRule
-from turnstile_core.validator import (
+from turnstile_core.definition.model import CompositeValidation, Severity, ValidationRule
+from turnstile_core.runtime.gates import (
     ValidationResult,
     build_checker,
     check_evidence_freshness,

@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from turnstile_core.errors import RegistryResolutionError
-from turnstile_core.models import RegistryExtend
+from turnstile_core.definition.model import RegistryExtend
 
 logger = logging.getLogger(__name__)
 

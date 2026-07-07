@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from turnstile_core.models import (
+from turnstile_core.definition.model import (
     ProcessDefinition,
     StateType,
     ValidationRule,

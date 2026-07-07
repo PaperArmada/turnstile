@@ -17,9 +17,9 @@ from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
 
-from turnstile_core.loader import load_registry, discover_definitions_full
-from turnstile_core.models import ProcessDefinition, StatePermissions
-from turnstile_core.persistence import ProcessInstance, StateStore
+from turnstile_core.definition.loader import load_registry, discover_definitions_full
+from turnstile_core.definition.model import ProcessDefinition, StatePermissions
+from turnstile_core.instance import ProcessInstance, StateStore
 
 
 @dataclass

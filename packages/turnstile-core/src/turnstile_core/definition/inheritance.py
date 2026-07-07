@@ -6,7 +6,7 @@ import copy
 from typing import Any
 
 from turnstile_core.errors import InheritanceError
-from turnstile_core.models import (
+from turnstile_core.definition.model import (
     ActionHook,
     OverrideSpec,
     ProcessDefinition,

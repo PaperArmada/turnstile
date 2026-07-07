@@ -1,11 +1,11 @@
-"""Tests for turnstile_core.models."""
+"""Tests for turnstile_core.definition.model."""
 
 from pathlib import Path
 
 import pytest
 import yaml
 
-from turnstile_core.models import (
+from turnstile_core.definition.model import (
     CompositeValidation,
     ProcessDefinition,
     ProcessParameter,
