@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from functools import cached_property
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
@@ -375,12 +376,13 @@ class ProcessDefinition(BaseModel):
 
         return self
 
+    @cached_property
+    def _states_by_id(self) -> dict[str, ProcessState]:
+        return {s.id: s for s in self.states}
+
     def get_state(self, state_id: str) -> ProcessState | None:
         """Look up a state by ID."""
-        for s in self.states:
-            if s.id == state_id:
-                return s
-        return None
+        return self._states_by_id.get(state_id)
 
     def initial_state(self) -> ProcessState:
         """Return the initial state."""

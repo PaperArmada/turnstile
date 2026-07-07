@@ -70,8 +70,7 @@ def _build_context(
     agent_context_summary = ""
 
     if defn:
-        state_map = {s.id: s for s in defn.states}
-        state_obj = state_map.get(instance.current_state)
+        state_obj = defn.get_state(instance.current_state)
         if state_obj:
             state_desc = state_obj.description
             transitions = state_obj.transitions
@@ -99,8 +98,7 @@ def _build_context(
 
     waiting_for = ""
     if instance.waiting and defn:
-        state_map = {s.id: s for s in defn.states}
-        state_obj = state_map.get(instance.current_state)
+        state_obj = defn.get_state(instance.current_state)
         if state_obj and state_obj.signal:
             waiting_for = state_obj.signal.name
 
@@ -350,10 +348,12 @@ def check_enforcement(
             context=contexts, guidance=guidance,
         )
 
-    # Check the action permission on non-suspended instances
+    # Check the action permission on non-suspended instances.
+    # Only "edit" is governed today; unknown actions are allowed, but
+    # explicitly, not via a fail-open attribute lookup.
     permitted_by = [
         c for c in non_suspended
-        if getattr(c.permissions, action, True)
+        if c.permissions.edit or action != "edit"
     ]
 
     if permitted_by:
