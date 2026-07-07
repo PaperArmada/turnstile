@@ -10,6 +10,7 @@ Invoked as a Claude Code PreToolUse hook via: turnstile guard
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from pathlib import Path
 from typing import Any
@@ -17,8 +18,10 @@ from typing import Any
 from turnstile_core.ops.enforcement import EnforcementResult, check_enforcement
 from turnstile_core.definition.loader import load_registry
 
+logger = logging.getLogger(__name__)
 
-def _find_turnstile_root() -> str:
+
+def find_turnstile_root() -> str:
     """Find the turnstile repo root by walking up from this file.
 
     Looks for the nearest ancestor containing both pyproject.toml
@@ -109,8 +112,10 @@ def run_guard() -> None:
             print(json.dumps(response))
 
     except Exception:
-        # Fail open: if anything goes wrong, allow the action
-        pass
+        # Fail open: if anything goes wrong, allow the action — but
+        # leave a trace on stderr (never stdout, which carries the
+        # hook response protocol).
+        logger.warning("Guard check failed; allowing action", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +203,7 @@ def install_enforcement(
         A result dict with status information.
     """
     if turnstile_dir is None and repo_url is None:
-        turnstile_dir = _find_turnstile_root()
+        turnstile_dir = find_turnstile_root()
 
     settings_dir = project_root / ".claude"
     settings_path = settings_dir / "settings.json"

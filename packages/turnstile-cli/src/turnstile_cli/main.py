@@ -15,7 +15,7 @@ import click
 from turnstile_core.definition.analysis import generate_mermaid, simulate_dry_run
 from turnstile_core.runtime.engine import Engine
 from turnstile_core.ops.guard import (
-    _find_turnstile_root,
+    find_turnstile_root,
     install_enforcement,
     run_guard,
     update_registry_enforcement,
@@ -847,7 +847,7 @@ def update(
     try:
         if dev:
             source_root = Path(
-                turnstile_dir or _find_turnstile_root()
+                turnstile_dir or find_turnstile_root()
             )
             source_dir = source_root / ".processes"
             if not source_dir.exists():
@@ -1021,7 +1021,7 @@ def init(
     repo_url = repo or TURNSTILE_REPO_URL
 
     if dev and turnstile_dir is None:
-        turnstile_dir = _find_turnstile_root()
+        turnstile_dir = find_turnstile_root()
 
     created: list[str] = []
     proc_dir = root / ".processes"
@@ -1226,7 +1226,7 @@ def enforce_on(ctx: click.Context, dev: bool, turnstile_dir: str | None, repo: s
     update_registry_enforcement(root, "enforce")
     if dev:
         result = install_enforcement(
-            root, "enforce", turnstile_dir=turnstile_dir or _find_turnstile_root()
+            root, "enforce", turnstile_dir=turnstile_dir or find_turnstile_root()
         )
     else:
         result = install_enforcement(
@@ -1247,7 +1247,7 @@ def enforce_monitor(ctx: click.Context, dev: bool, turnstile_dir: str | None, re
     update_registry_enforcement(root, "monitor")
     if dev:
         result = install_enforcement(
-            root, "monitor", turnstile_dir=turnstile_dir or _find_turnstile_root()
+            root, "monitor", turnstile_dir=turnstile_dir or find_turnstile_root()
         )
     else:
         result = install_enforcement(
