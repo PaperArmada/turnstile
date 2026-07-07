@@ -418,7 +418,7 @@ class TestGenerateHookConfig:
         assert "PreToolUse" in config["hooks"]
         entries = config["hooks"]["PreToolUse"]
         assert len(entries) == 1
-        assert entries[0]["matcher"] == "Edit|Write"
+        assert entries[0]["matcher"] == "Edit|Write|Bash"
         assert len(entries[0]["hooks"]) == 1
         cmd = entries[0]["hooks"][0]["command"]
         assert "turnstile guard" in cmd

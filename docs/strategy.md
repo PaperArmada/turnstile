@@ -123,10 +123,12 @@ model driving every item is [guarantee.md](guarantee.md))
 6. ✅ `turnstile doctor`: verify the acceptance boundary itself
    (anchor/key placement, ledger visibility, branch protection where
    queryable).
-7. Widen guard interception: state permissions govern Bash/git/deploy
-   tool calls, not just file edits.
+7. ✅ Widen guard interception: state permissions govern shell
+   commands (`run`, `allow_commands`, `deny_commands` with fnmatch
+   patterns), not just file edits; the guard routes Bash tool calls
+   through the run action.
 
-All shipped items are experimental surface (see
+Phase 1 is complete. All shipped items are experimental surface (see
 [STABILITY.md](../STABILITY.md)); usage in
 [verification.md](verification.md).
 
