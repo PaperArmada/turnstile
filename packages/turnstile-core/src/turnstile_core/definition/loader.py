@@ -308,7 +308,16 @@ def _discover_all(project_root: Path) -> dict[str, DiscoveredDefinition]:
             if is_override_file(path):
                 local_override_paths.append(path)
                 continue
-            defn = load_definition(path)
+            try:
+                defn = load_definition(path)
+            except DefinitionError as e:
+                # Fail open: one stray or malformed YAML (a policy file,
+                # a work in progress) must not brick discovery of every
+                # other definition. Skip it, loudly.
+                logger.warning(
+                    "Skipping %s during discovery: %s", path.name, e
+                )
+                continue
             if defn.name in all_discovered:
                 logger.info(
                     f"Local definition '{defn.name}' overrides "

@@ -328,3 +328,23 @@ class TestDiscoverDefinitionsFull:
         result = discover_definitions_full(tmp_path)
         # Source from local path should have "local:" prefix
         assert result["release"].source.startswith("local:")
+
+
+class TestDiscoveryFailOpen:
+    def test_malformed_yaml_skipped_not_fatal(self, tmp_path):
+        """A stray non-definition YAML (e.g. an acceptance policy) in
+        .processes/ must not brick discovery of valid definitions."""
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir()
+        (proc_dir / "good.yaml").write_text(
+            "name: good\n"
+            "states:\n"
+            "  - {id: start, type: initial, transitions: [done]}\n"
+            "  - {id: done, type: terminal}\n"
+        )
+        (proc_dir / "policy.yaml").write_text(
+            "process: good\nrequired_states: [done]\n"
+        )
+        discovered = discover_definitions_full(tmp_path)
+        assert "good" in discovered
+        assert len(discovered) == 1

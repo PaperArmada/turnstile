@@ -197,23 +197,32 @@ The engineering obligations this proof sketch creates (tracked in
 5. Hash-chained trail with contemporaneous external anchoring.
 6. `turnstile doctor` for acceptance-boundary configuration.
 
-## Proof of concept
+## Implementation status
 
-Every mechanism above has a working proof of concept in this repo:
+Every mechanism above is implemented (experimental surface — see
+[STABILITY.md](../STABILITY.md); usage in [verification.md](verification.md)):
 
-- **`turnstile_core/ops/verify.py`** (experimental) — the acceptance
-  policy model, hash-chained trail + anchor comparison, HMAC signal
-  signatures, gate re-execution, and git-reachability artifact
-  binding.
-- **`turnstile verify <instance> --policy <yaml> [--range a..b]`** —
-  the CLI, exiting 0/1, ready to wire into a required CI check.
+- **Engine-side automation** — with `settings.verification` configured
+  in the registry, the engine stamps the git HEAD onto every history
+  entry and deposits the chain head at the anchor on every persistence
+  event. No agent cooperation required or trusted.
+- **`turnstile verify [instance] --policy <yaml> [--range a..b]`** —
+  the acceptance check, exiting 0/1; instance defaults to the latest
+  completed run of the policy's process. Shipped as a GitHub Action
+  (`action.yml`).
+- **`turnstile approve`** — the operator identity channel: delivers a
+  signal signed with a key held outside the agent's write domain.
+- **`turnstile doctor`** — inspects the acceptance boundary (anchor
+  and key placement, SHA recording, ledger visibility, branch
+  protection) and fails on configuration that would void the
+  guarantee.
 - **`scripts/poc_guarantee.py`** — the attack demo: six scenarios
   (clean run, tampered ledger, reality drift, self-approval,
   uncertified commit, skipped review) staged against a real engine,
   each caught by exactly the mechanism this document predicts.
-- **`tests/test_verify.py`** — the same scenarios as CI-durable tests.
-
-Run the demo: `uv run python scripts/poc_guarantee.py`
+  Run it: `uv run python scripts/poc_guarantee.py`
+- **`tests/test_verify.py`, `tests/test_trail.py`** — the same
+  scenarios plus the engine-side automation as CI-durable tests.
 
 ## Honest limits, restated
 

@@ -1,0 +1,88 @@
+name: 'Turnstile Verify'
+description: >-
+  Acceptance-time workflow conformance: verify that the work in this PR
+  followed its declared Turnstile process — gates re-executed, trail
+  intact, commits certified. Exits nonzero if not. See docs/guarantee.md.
+branding:
+  icon: 'check-circle'
+  color: 'green'
+
+inputs:
+  policy:
+    description: 'Path to the acceptance policy YAML (repo-relative).'
+    required: true
+  instance-id:
+    description: >-
+      Process instance to verify. Default: the most recently completed
+      instance of the policy''s process found in the ledger.
+    required: false
+    default: ''
+  range:
+    description: >-
+      Git commit range to bind (e.g. main..HEAD). Default on
+      pull_request events: base..HEAD.
+    required: false
+    default: ''
+  project:
+    description: 'Project root containing .processes/ and the ledger.'
+    required: false
+    default: '.'
+  turnstile-ref:
+    description: 'Turnstile git ref to install the CLI from.'
+    required: false
+    default: 'main'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+
+    - name: Run turnstile verify
+      shell: bash
+      env:
+        POLICY: ${{ inputs.policy }}
+        INSTANCE_ID: ${{ inputs.instance-id }}
+        RANGE_INPUT: ${{ inputs.range }}
+        PROJECT: ${{ inputs.project }}
+        TS_REF: ${{ inputs.turnstile-ref }}
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      run: |
+        set -uo pipefail
+        cd "$PROJECT"
+
+        RANGE="$RANGE_INPUT"
+        if [ -z "$RANGE" ] && [ -n "${BASE_SHA:-}" ]; then
+          # Ensure the base is present in shallow checkouts
+          git fetch -q --no-tags origin "$BASE_SHA" 2>/dev/null || true
+          RANGE="${BASE_SHA}..HEAD"
+        fi
+
+        ARGS=()
+        [ -n "$INSTANCE_ID" ] && ARGS+=("$INSTANCE_ID")
+        ARGS+=(--policy "$POLICY")
+        [ -n "$RANGE" ] && ARGS+=(--range "$RANGE")
+
+        set +e
+        OUTPUT=$(uvx --python 3.12 \
+          --from "turnstile-cli @ git+https://github.com/PaperArmada/turnstile.git@${TS_REF}#subdirectory=packages/turnstile-cli" \
+          turnstile verify "${ARGS[@]}" 2>&1)
+        CODE=$?
+        set -e
+
+        echo "$OUTPUT"
+        {
+          if [ "$CODE" -eq 0 ]; then
+            echo "## :white_check_mark: Turnstile: workflow followed"
+          else
+            echo "## :x: Turnstile: workflow NOT verified"
+          fi
+          echo ''
+          echo '```'
+          echo "$OUTPUT"
+          echo '```'
+          echo ''
+          echo '_What the statuses mean: **PROVEN** was recomputed in this run and does not trust the ledger; **ATTESTED** relies on the anchored, hash-chained trail; **HUMAN** is an authenticated approval. See docs/guarantee.md._'
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        exit $CODE

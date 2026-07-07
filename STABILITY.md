@@ -58,10 +58,14 @@ These ship and work, but may evolve before 1.0. Breaking changes are possible wi
 - `extends` directive in process overrides
 - `add_states`, `patch_states`, `parameters.append` operations under `overrides`
 
-**Acceptance verification (proof of concept)**
-- `turnstile verify`, the acceptance-policy YAML shape, and the
-  `turnstile_core.ops.verify` module (hash chain, anchoring, signal
-  signatures, artifact binding) — see [docs/guarantee.md](docs/guarantee.md)
+**Acceptance verification**
+- `turnstile verify`, `turnstile approve`, `turnstile doctor`, the
+  acceptance-policy YAML shape, `settings.verification` in
+  registry.yaml, the GitHub Action (`action.yml`), and the
+  `turnstile_core.ops.verify` / `instance.trail` modules (hash chain,
+  anchoring, signal signatures, artifact binding) — see
+  [docs/guarantee.md](docs/guarantee.md) and
+  [docs/verification.md](docs/verification.md)
 
 **Other**
 - `process_migrate` and definition-hash-based migration prompts

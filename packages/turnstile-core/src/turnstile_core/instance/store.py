@@ -12,13 +12,20 @@ from turnstile_core.instance.model import (
     generate_id,
     now_iso,
 )
+from turnstile_core.instance.trail import Anchor
 
 
 class StateStore:
-    """File-based state persistence for process instances."""
+    """File-based state persistence for process instances.
 
-    def __init__(self, state_dir: Path):
+    When constructed with an anchor, every persistence event deposits
+    the instance's chain head there — contemporaneous anchoring for
+    acceptance-time verification (docs/guarantee.md).
+    """
+
+    def __init__(self, state_dir: Path, anchor: Anchor | None = None):
         self.state_dir = state_dir
+        self.anchor = anchor
         self.active_dir = state_dir / "active"
         self.completed_dir = state_dir / "completed"
         self.abandoned_dir = state_dir / "abandoned"
@@ -60,6 +67,7 @@ class StateStore:
             started_by=started_by,
         )
         self._write(instance)
+        self._anchor(instance)
         self.append_log(
             f"STARTED {process_name}-{instance_id} at {initial_state}"
         )
@@ -113,6 +121,7 @@ class StateStore:
         """Persist an instance back to disk."""
         instance.updated_at = now_iso()
         self._write(instance)
+        self._anchor(instance)
 
     def list_active(self) -> list[ProcessInstance]:
         """List all active process instances."""
@@ -140,6 +149,7 @@ class StateStore:
         if src.exists():
             src.unlink()
 
+        self._anchor(instance)
         self.append_log(
             f"COMPLETED {instance.process_name}-{instance.instance_id}"
         )
@@ -161,6 +171,7 @@ class StateStore:
         if src.exists():
             src.unlink()
 
+        self._anchor(instance)
         self.append_log(
             f"ABANDONED {instance.process_name}-{instance.instance_id}: {reason}"
         )
@@ -190,3 +201,7 @@ class StateStore:
     def _write(self, instance: ProcessInstance) -> None:
         path = self._active_path(instance.process_name, instance.instance_id)
         path.write_text(instance.model_dump_json(indent=2, by_alias=True))
+
+    def _anchor(self, instance: ProcessInstance) -> None:
+        if self.anchor is not None:
+            self.anchor.record(instance)

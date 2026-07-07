@@ -11,6 +11,7 @@ and shared by the transition and signal paths.
 from __future__ import annotations
 
 import logging
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -47,6 +48,7 @@ from turnstile_core.instance import (
     StateStore,
     now_iso,
 )
+from turnstile_core.instance.trail import Anchor
 from turnstile_core.instance.analytics import compute_analytics
 from turnstile_core.kernel.plan import (
     coerce_extras,
@@ -143,8 +145,16 @@ class Engine:
         self.registry = load_registry(project_root)
         self._definitions: dict[str, tuple[ProcessDefinition, str]] = {}
         self._discovered: dict[str, DiscoveredDefinition] = {}
+        v = self.registry.settings.verification
+        anchor = None
+        if v.anchor_file or v.anchor_command:
+            anchor = Anchor(
+                file=v.anchor_file or None,
+                command=v.anchor_command or None,
+            )
         self._store = StateStore(
-            project_root / self.registry.settings.state_dir
+            project_root / self.registry.settings.state_dir,
+            anchor=anchor,
         )
         self._load_definitions()
 
@@ -380,6 +390,31 @@ class Engine:
             "parameters": instance.parameters,
         }
 
+    def _current_git_sha(self) -> str | None:
+        """HEAD of the project repo, for artifact binding. Fail-open:
+        returns None outside a git repo or when disabled."""
+        if not self.registry.settings.verification.record_git_sha:
+            return None
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=self.project_root, capture_output=True, text=True,
+                timeout=10, check=True,
+            )
+            return result.stdout.strip() or None
+        except Exception:
+            return None
+
+    def _stamp_sha(self, metadata: dict[str, Any] | None) -> dict[str, Any]:
+        """Record the current commit on a history entry's metadata so
+        the trail certifies specific commits (docs/guarantee.md)."""
+        stamped = dict(metadata or {})
+        if "git_sha" not in stamped:
+            sha = self._current_git_sha()
+            if sha:
+                stamped["git_sha"] = sha
+        return stamped
+
     async def transition(
         self, instance_id: str, target_state: str,
         metadata: dict[str, Any] | None = None,
@@ -442,7 +477,7 @@ class Engine:
             "role": target.role,
             "session_id": session_id,
             "validations": [_vr_to_dict(r) for r in all_results],
-            "metadata": metadata or {},
+            "metadata": self._stamp_sha(metadata),
         })
         instance.current_state = target_state
         instance.history.append(history_entry)
@@ -539,7 +574,7 @@ class Engine:
             "triggered_by": f"signal: {signal_name}",
             "role": target.role,
             "session_id": session_id,
-            "metadata": {"signal_data": data},
+            "metadata": self._stamp_sha({"signal_data": data}),
         })
         instance.current_state = target.id
         instance.history.append(history_entry)
@@ -605,6 +640,7 @@ class Engine:
             "role": target.role,
             "session_id": session_id,
             "validations": [],
+            "metadata": self._stamp_sha(None),
         })
 
         instance.current_state = target_state
