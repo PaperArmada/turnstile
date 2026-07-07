@@ -172,23 +172,51 @@ def certified_sha(instance: ProcessInstance) -> str | None:
     return None
 
 
-def range_is_certified(repo: Path, commit_range: str, certified: str) -> tuple[bool, str]:
+def _touches_only(repo: Path, sha: str, prefix: str) -> bool:
+    """True if a commit modifies nothing outside the given path prefix."""
+    try:
+        files = _git(
+            repo, "diff-tree", "--no-commit-id", "--name-only", "-r", sha
+        ).splitlines()
+    except subprocess.CalledProcessError:
+        return False
+    return bool(files) and all(f.startswith(prefix) for f in files)
+
+
+def range_is_certified(
+    repo: Path,
+    commit_range: str,
+    certified: str,
+    ledger_prefix: str = ".process-state/",
+) -> tuple[bool, str]:
     """Check that every commit in the range is reachable from the
     certified SHA — i.e., the instance's final checkpoint covers the
-    work under review."""
+    work under review.
+
+    Commits that touch only the ledger directory are exempt: with a
+    committed ledger, the certification record itself necessarily
+    lands *after* the certified snapshot, and cannot certify itself.
+    A ledger-only commit changes no product code, so exempting it is
+    sound; anything else outside the certified snapshot fails.
+    """
     try:
         range_shas = _git(repo, "rev-list", commit_range).splitlines()
         reachable = set(_git(repo, "rev-list", certified).splitlines())
     except subprocess.CalledProcessError as e:
         return False, f"git error: {e.stderr.strip() or e}"
     uncovered = [s for s in range_shas if s not in reachable]
+    exempt = [s for s in uncovered if _touches_only(repo, s, ledger_prefix)]
+    uncovered = [s for s in uncovered if s not in exempt]
     if uncovered:
         return False, (
             f"{len(uncovered)} commit(s) not covered by certified "
             f"snapshot {certified[:12]}: "
             + ", ".join(s[:12] for s in uncovered[:5])
         )
-    return True, f"{len(range_shas)} commit(s) covered by {certified[:12]}"
+    detail = f"{len(range_shas)} commit(s) covered by {certified[:12]}"
+    if exempt:
+        detail += f" ({len(exempt)} ledger-only commit(s) exempt)"
+    return True, detail
 
 
 # ---------------------------------------------------------------------------

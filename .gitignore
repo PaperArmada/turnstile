@@ -12,8 +12,11 @@ build/
 # uv
 uv.lock
 
-# Process engine runtime state
-.process-state/
+# Process engine runtime state: in-flight instances and the text log
+# are ephemeral; the completed/abandoned ledger is the audit record
+# and IS committed so CI can verify it (docs/verification.md)
+.process-state/active/
+.process-state/log.txt
 
 # Machine-specific (contains absolute paths, regenerate with `turnstile init`)
 .mcp.json

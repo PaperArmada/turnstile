@@ -41,10 +41,42 @@ and key placement (inside the repo = FAIL — the agent can reach them),
 SHA recording, ledger visibility to CI, and branch protection where it
 can. Fix FAIL items before trusting any green check.
 
-Note on ledger visibility: `turnstile init` gitignores
-`.process-state/` by default. For acceptance verification, CI must see
-the trail — commit the `completed/` ledger, or upload it as a CI
-artifact and restore it before verifying.
+Note on ledger visibility: `turnstile init` gitignores only
+`.process-state/active/` and `.process-state/log.txt` — in-flight
+state is ephemeral, but the **completed/abandoned ledger is the audit
+record and is committed**, so the certification travels with the diff
+and CI can read it. (Repos initialized before this convention should
+update their `.gitignore`; `turnstile doctor` flags it.)
+
+### Remote anchoring
+
+A file anchor is only as good as its placement. For real deployments,
+run the reference anchor server somewhere the agent has no
+credentials:
+
+```bash
+python -m turnstile_core.ops.anchor_server --port 8123 --state /var/lib/turnstile
+```
+
+It enforces append-only semantics: an anchor may grow (more entries),
+never shrink or change at the same entry count — rewrites get a 409
+and land in the audit log. Point the engine at it:
+
+```yaml
+settings:
+  verification:
+    anchor_command: >-
+      curl -fsS -X POST http://anchor.internal:8123/anchors
+      -H 'Content-Type: application/json'
+      -d '{"instance_id":"{instance_id}","head":"{head}","entries":{entries}}'
+```
+
+And in CI, fetch the snapshot before verifying:
+
+```bash
+curl -fsS http://anchor.internal:8123/anchors -o /tmp/anchors.json
+turnstile verify --policy policy.yaml   # policy anchor_file: /tmp/anchors.json
+```
 
 ## 3. Approve human gates as yourself
 
@@ -98,7 +130,14 @@ jobs:
       - uses: PaperArmada/turnstile@main
         with:
           policy: .processes/policies/release.yaml
+          require-pr-approval: 'true'
 ```
+
+`require-pr-approval` is the GitHub-native human gate: the job fails
+unless the PR carries an APPROVED review from someone other than its
+author. Reviewer identity comes from GitHub authentication — an agent
+cannot manufacture it. Use it for PR flows; use `turnstile approve`
+(HMAC) for flows that never touch a PR.
 
 Then make the check required: repository settings → branch protection
 on the default branch → require the `turnstile` job, disallow direct

@@ -115,17 +115,27 @@ def doctor(ctx: click.Context) -> None:
                    "no signal_key_file configured — human-gated wait "
                    "states cannot be verified")
 
-    # Ledger visibility to CI
+    # Ledger visibility to CI. Convention: active/ and log.txt are
+    # ephemeral and ignored; completed/ and abandoned/ are the audit
+    # record and must be visible for CI to verify.
     gitignore = root / ".gitignore"
-    ignored = gitignore.exists() and ".process-state" in gitignore.read_text()
-    if ignored:
+    lines = (
+        [ln.strip() for ln in gitignore.read_text().splitlines()]
+        if gitignore.exists() else []
+    )
+    whole_ledger_ignored = any(
+        ln in (".process-state", ".process-state/", ".process-state/*",
+               "/.process-state", "/.process-state/")
+        for ln in lines
+    )
+    if whole_ledger_ignored:
         _check(results, "WARN", "ledger visibility",
-               ".process-state/ is gitignored — CI cannot see the trail; "
-               "commit completed instances (or ship the ledger as a CI "
-               "artifact) for acceptance verification to work")
+               "all of .process-state/ is gitignored — CI cannot see the "
+               "trail; ignore only active/ and log.txt so the completed "
+               "ledger is committed (docs/verification.md)")
     else:
         _check(results, "OK", "ledger visibility",
-               ".process-state/ visible to version control")
+               "completed/abandoned ledger visible to version control")
 
     # Branch protection (best effort — needs gh)
     gh = shutil.which("gh")
