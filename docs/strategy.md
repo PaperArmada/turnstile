@@ -4,8 +4,9 @@
 
 This document is the product strategy. [Vision](vision.md) says what
 Turnstile believes; this says what Turnstile promises, to whom, and in
-what order we build it. It was produced through the project's own
-`decision-record` process.
+what order we build it. The threat model behind the central promise is
+[guarantee.md](guarantee.md). It was produced through the project's
+own `decision-record` process.
 
 ## The problem, stated plainly
 
@@ -102,13 +103,23 @@ supporting infrastructure.
 
 ## Roadmap
 
-**Phase 1 — make the guarantee airtight** (engine work)
+**Phase 1 — make the guarantee airtight** (engine work; the threat
+model driving every item is [guarantee.md](guarantee.md))
 
 1. `turnstile verify` with per-process acceptance policy (required
    states, required gates, re-run gates, allowed exceptions).
-2. Hash-chained ledger + integrity check inside `verify`.
-3. Gate re-execution at verify time.
-4. Widen guard interception: state permissions govern Bash/git/deploy
+2. Gate re-execution at verify time; gates classified re-runnable vs.
+   advisory and reported as PROVEN vs. ATTESTED.
+3. Artifact binding: record the git SHA on every history entry and
+   check commit-range coverage in `verify` — the trail certifies
+   *this diff*, not just that *a process ran*.
+4. Authenticated human signals (GitHub approval, operator-signed CLI);
+   an agent-callable signal on a human-gated wait state fails
+   verification.
+5. Hash-chained ledger with contemporaneous external anchoring.
+6. `turnstile doctor`: verify the acceptance boundary itself (branch
+   protection on, check required, direct pushes off).
+7. Widen guard interception: state permissions govern Bash/git/deploy
    tool calls, not just file edits.
 
 **Phase 2 — put the proof where decisions happen**
