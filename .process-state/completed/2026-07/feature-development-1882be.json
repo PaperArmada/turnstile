@@ -1,0 +1,176 @@
+{
+  "instance_id": "1882be",
+  "process_name": "feature-development",
+  "process_version": "1.3.0",
+  "definition_hash": "sha256:b36db207cf58",
+  "parameters": {
+    "feature_name": "adoption-surface",
+    "test_command": "uv run pytest packages/turnstile-core/tests/",
+    "issue_id": "none"
+  },
+  "current_state": "done",
+  "started_at": "2026-07-07T13:03:59.106373+00:00",
+  "updated_at": "2026-07-07T13:10:10.355756+00:00",
+  "started_by": "",
+  "history": [
+    {
+      "from": "start",
+      "to": "understand",
+      "at": "2026-07-07T13:04:27.899240+00:00",
+      "triggered_by": "",
+      "role": "",
+      "session_id": "adoption",
+      "validations": [
+        {
+          "command": "test 'none' != 'none' && echo 'linked to none' || echo 'no issue linked (consider passing issue_id)'",
+          "expect": "not_empty",
+          "passed": true,
+          "output": "no issue linked (consider passing issue_id)",
+          "exit_code": 0,
+          "message": "Issue linkage check",
+          "severity": "info",
+          "error": "",
+          "elapsed_ms": 2
+        },
+        {
+          "command": "uv run pytest packages/turnstile-core/tests/ 2>&1 | tail -1 || echo 'no test output'",
+          "expect": "not_empty",
+          "passed": true,
+          "output": "======================= 520 passed, 1 warning in 28.05s ========================",
+          "exit_code": 0,
+          "message": "Current test suite status (baseline before changes)",
+          "severity": "info",
+          "error": "",
+          "elapsed_ms": 28780
+        },
+        {
+          "command": "git status --short | head -20",
+          "expect": "empty",
+          "passed": true,
+          "output": "",
+          "exit_code": 0,
+          "message": "Working tree should be clean before starting",
+          "severity": "warning",
+          "error": "",
+          "elapsed_ms": 7
+        }
+      ],
+      "metadata": {
+        "git_sha": "bc0feaae946b0c2e3a19a3dd5c088a22f2c535e4"
+      }
+    },
+    {
+      "from": "understand",
+      "to": "implement",
+      "at": "2026-07-07T13:04:27.904326+00:00",
+      "triggered_by": "",
+      "role": "",
+      "session_id": "adoption",
+      "validations": [],
+      "metadata": {
+        "git_sha": "bc0feaae946b0c2e3a19a3dd5c088a22f2c535e4"
+      }
+    },
+    {
+      "from": "implement",
+      "to": "test",
+      "at": "2026-07-07T13:09:09.385425+00:00",
+      "triggered_by": "",
+      "role": "",
+      "session_id": "adoption",
+      "validations": [
+        {
+          "command": "git diff --stat HEAD 2>/dev/null | tail -1 || echo 'no changes'",
+          "expect": "not_empty",
+          "passed": false,
+          "output": "",
+          "exit_code": 0,
+          "message": "Changes since last commit",
+          "severity": "info",
+          "error": "",
+          "elapsed_ms": 5
+        }
+      ],
+      "metadata": {
+        "git_sha": "c8eabe84a5c36ec0a1c1977824c31254020487ac"
+      }
+    },
+    {
+      "from": "test",
+      "to": "review",
+      "at": "2026-07-07T13:10:10.351156+00:00",
+      "triggered_by": "",
+      "role": "",
+      "session_id": "adoption",
+      "validations": [
+        {
+          "command": "uv run pytest packages/turnstile-core/tests/ 2>&1 | tail -1",
+          "expect": "contains(\"passed\")",
+          "passed": true,
+          "output": "======================= 533 passed, 1 warning in 30.32s ========================",
+          "exit_code": 0,
+          "message": "Test suite must pass",
+          "severity": "error",
+          "error": "",
+          "elapsed_ms": 30700
+        },
+        {
+          "command": "uv run pytest packages/turnstile-core/tests/ 2>&1 | tail -1 | grep -oP '\\d+(?= passed)'",
+          "expect": "not_empty",
+          "passed": true,
+          "output": "533",
+          "exit_code": 0,
+          "message": "Test count (verify no regressions)",
+          "severity": "info",
+          "error": "",
+          "elapsed_ms": 30254
+        },
+        {
+          "command": "git diff --name-only 2>/dev/null | wc -l | tr -d ' '",
+          "expect": "greater_than(0)",
+          "passed": false,
+          "output": "0",
+          "exit_code": 0,
+          "message": "Must have uncommitted changes to review",
+          "severity": "warning",
+          "error": "",
+          "elapsed_ms": 3
+        },
+        {
+          "command": "git diff --stat 2>/dev/null",
+          "expect": "not_empty",
+          "passed": false,
+          "output": "",
+          "exit_code": 0,
+          "message": "Summary of changes",
+          "severity": "info",
+          "error": "",
+          "elapsed_ms": 3
+        }
+      ],
+      "metadata": {
+        "git_sha": "c8eabe84a5c36ec0a1c1977824c31254020487ac"
+      }
+    },
+    {
+      "from": "review",
+      "to": "done",
+      "at": "2026-07-07T13:10:10.354052+00:00",
+      "triggered_by": "",
+      "role": "",
+      "session_id": "adoption",
+      "validations": [],
+      "metadata": {
+        "git_sha": "c8eabe84a5c36ec0a1c1977824c31254020487ac"
+      }
+    }
+  ],
+  "overrides": [],
+  "status": "completed",
+  "parent_instance_id": null,
+  "parent_state_id": null,
+  "child_instance_id": null,
+  "suspended": false,
+  "waiting": false,
+  "signal_data": null
+}
