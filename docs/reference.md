@@ -205,6 +205,18 @@ turnstile enforce status
 turnstile enforce on
 turnstile enforce monitor
 turnstile enforce off
+
+# Adopt an existing CLAUDE.md / rules file into a draft process
+# (experimental — extracts gates and command restrictions, drafts a
+#  definition + acceptance policy, reports what needs human judgment)
+turnstile adopt
+turnstile adopt AGENTS.md --name my-workflow --dry-run
+
+# Acceptance verification (experimental — docs/verification.md)
+turnstile verify --policy .processes/policies/release.yaml --range main..HEAD
+turnstile report --policy .processes/policies/release.yaml -o report.md
+turnstile approve <instance> release_approval -d approved=true --to ship
+turnstile doctor
 ```
 
 All commands accept `--project / -p` to specify the project root (defaults to CWD).

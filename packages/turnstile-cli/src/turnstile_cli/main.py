@@ -15,6 +15,7 @@ import os
 import click
 
 from turnstile_cli import (
+    adoption,
     bootstrap,
     definitions,
     doctor,
@@ -61,6 +62,7 @@ cli.add_command(bootstrap.init)
 cli.add_command(bootstrap.update)
 cli.add_command(bootstrap.init_package)
 cli.add_command(bootstrap.hooks)
+cli.add_command(adoption.adopt)
 
 # Enforcement
 cli.add_command(enforcement.guard)
