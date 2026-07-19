@@ -238,7 +238,7 @@ See [multi-actor-conops.md](multi-actor-conops.md) for detailed treatment.
 
 3. **Blocking vs. non-blocking wait.** Wait states suspend the instance, not the agent. The agent's session can end or do other work; the instance sits on disk until a signal arrives. For the main process pattern, this means: dispatch work via async subprocess, return to ready, pick up completed work later. No parallel regions needed; concurrency lives in independent child instances.
 
-4. **Role-to-session routing.** Start with process parameters mapping roles to communication addresses: `process_start("main", {developer_address: "agent-mail-channel", reviewer_address: "..."})`. When the engine enters a dispatch or wait state, it looks up the role's address from parameters and sends the notification mechanically. No named agent registry needed until routing becomes complex.
+4. **Role-to-session routing.** Start with process parameters mapping roles to communication addresses: `process_start("main", {developer_address: "<coordination-channel>", reviewer_address: "..."})`. When the engine enters a dispatch or wait state, it looks up the role's address from parameters and sends the notification mechanically. No named agent registry needed until routing becomes complex.
 
 5. **Main process lifecycle.** Carried forward as open item. Persistent non-terminating processes need adapted analytics and possibly an explicit `shutdown` terminal.
 
@@ -268,7 +268,7 @@ When a state requires a non-agent actor (wait state with a specific role), the p
     name: review_complete
   on_enter:
     notify:
-      channel: agent_mail
+      channel: coordination_channel
       to: "${legal_reviewer}"
       message: "Review needed for ${document_name}"
 ```
