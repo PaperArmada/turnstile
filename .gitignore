@@ -22,6 +22,12 @@ uv.lock
 # Generated JSON schemas (regenerate with `turnstile schema`)
 .processes/schemas/
 
+# Pre-flip-sensitive docs: name unpatched security findings, must not be
+# committed while the repo is private. Remove these lines when the findings
+# are resolved and the docs are scrubbed for publication.
+docs/SECURITY-NOTES.md
+docs/execution-plan.md
+
 # IDE
 .vscode/
 .idea/
