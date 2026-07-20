@@ -1,0 +1,43 @@
+name: injection
+description: "Gate commands that reference a parameter, for injection testing"
+version: "1.0.0"
+
+parameters:
+  - name: v
+    description: "Value under test"
+    required: true
+
+states:
+  - id: start
+    type: initial
+    transitions: [quoted, unquoted, single_quoted]
+
+  - id: quoted
+    description: "Placeholder inside double quotes (the natural authoring style)"
+    transitions: [done]
+    on_enter:
+      validate:
+        - command: 'echo "${v}"'
+          expect: not_empty
+          message: "quoted placeholder"
+
+  - id: unquoted
+    description: "Bare placeholder"
+    transitions: [done]
+    on_enter:
+      validate:
+        - command: 'echo ${v}'
+          expect: not_empty
+          message: "unquoted placeholder"
+
+  - id: single_quoted
+    description: "Placeholder inside single quotes"
+    transitions: [done]
+    on_enter:
+      validate:
+        - command: "echo '${v}'"
+          expect: not_empty
+          message: "single-quoted placeholder"
+
+  - id: done
+    type: terminal

@@ -1,0 +1,24 @@
+name: injection-hyphen
+description: "Parameter whose name is not a valid shell identifier"
+version: "1.0.0"
+
+parameters:
+  - name: my-param
+    description: "Name that cannot be exported to the environment"
+    required: true
+
+states:
+  - id: start
+    type: initial
+    transitions: [checked]
+
+  - id: checked
+    transitions: [done]
+    on_enter:
+      validate:
+        - command: 'echo "${my-param}"'
+          expect: not_empty
+          message: "non-identifier placeholder"
+
+  - id: done
+    type: terminal

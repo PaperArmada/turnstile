@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -122,12 +123,21 @@ def _is_json_type(s: str, expected_type: type) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def substitute_params(command: str, parameters: dict[str, str]) -> str:
-    """Replace ${var_name} placeholders in a command string."""
-    result = command
+def substitute_params(template: str, parameters: dict[str, str]) -> str:
+    """Replace ${var_name} placeholders in a plain string.
+
+    This performs no escaping and is therefore only safe for values that are
+    NOT handed to a shell: child process parameters, messages, and similar
+    data. Shell commands must never be built this way; pass the parameters to
+    run_command instead, which exports them to the environment.
+    """
+    result = template
     for key, value in parameters.items():
         result = result.replace(f"${{{key}}}", str(value))
     return result
+
+
+_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 # ---------------------------------------------------------------------------
@@ -174,17 +184,45 @@ def check_evidence_freshness(
 
 
 async def run_command(
-    command: str, cwd: Path, timeout: int = 60
+    command: str,
+    cwd: Path,
+    timeout: int = 60,
+    parameters: dict[str, str] | None = None,
 ) -> tuple[str, int]:
     """Run a shell command and return (stdout_stripped, exit_code).
 
+    Process parameters are supplied to the shell as environment variables
+    rather than being interpolated into the command text. The shell expands
+    the ${var} references itself, so a parameter value is never re-parsed as
+    shell syntax and cannot inject commands.
+
+    Interpolating the value into the command text is not a safe alternative,
+    even with shlex.quote. Quoting only protects a placeholder that is bare in
+    the template; for the far more natural `echo "${var}"` the injected quotes
+    land inside the author's quotes and a value such as 'x"; rm -rf .; echo "'
+    still escapes. Passing through the environment removes the class of bug
+    rather than narrowing it.
+
+    Parameter names that are not valid shell identifiers (for example
+    'my-param') cannot be exported and are skipped. Their placeholders are
+    left in the command rather than being filled in literally, because
+    substituting them would reintroduce the injection for the one class of
+    name that cannot be passed safely.
+
     Raises asyncio.TimeoutError if the command exceeds the timeout.
     """
+    env = os.environ.copy()
+    if parameters:
+        for key, value in parameters.items():
+            if _ENV_NAME_RE.match(key):
+                env[key] = str(value)
+
     proc = await asyncio.create_subprocess_shell(
         command,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=str(cwd),
+        env=env,
     )
     try:
         stdout, _stderr = await asyncio.wait_for(
@@ -209,7 +247,7 @@ async def run_validation(
     cwd: Path,
 ) -> ValidationResult:
     """Execute a single validation rule and return the result."""
-    command = substitute_params(rule.command, parameters)
+    command = rule.command
     start = time.monotonic()
 
     # Evidence-based: check freshness first
@@ -228,7 +266,9 @@ async def run_validation(
             )
 
     try:
-        output, exit_code = await run_command(command, cwd, timeout=rule.timeout)
+        output, exit_code = await run_command(
+            command, cwd, timeout=rule.timeout, parameters=parameters
+        )
     except asyncio.TimeoutError:
         elapsed = int((time.monotonic() - start) * 1000)
         return ValidationResult(

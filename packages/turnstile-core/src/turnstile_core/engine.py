@@ -487,9 +487,12 @@ class Engine:
         # Run on_exit actions for current state
         if current.on_exit and current.on_exit.actions:
             for action in current.on_exit.actions:
-                cmd = substitute_params(action.command, validation_params)
+                cmd = action.command
                 try:
-                    await run_command(cmd, self.project_root, timeout=60)
+                    await run_command(
+                        cmd, self.project_root, timeout=60,
+                        parameters=validation_params,
+                    )
                 except Exception:
                     pass  # Actions are best-effort
 
@@ -527,9 +530,12 @@ class Engine:
         # Run on_enter actions
         if target.on_enter and target.on_enter.actions:
             for action in target.on_enter.actions:
-                cmd = substitute_params(action.command, validation_params)
+                cmd = action.command
                 try:
-                    await run_command(cmd, self.project_root, timeout=60)
+                    await run_command(
+                        cmd, self.project_root, timeout=60,
+                        parameters=validation_params,
+                    )
                 except Exception:
                     pass  # Actions are best-effort
 
