@@ -1,0 +1,53 @@
+name: gated
+description: "A process whose gates fail, for testing gate enforcement"
+version: "1.0.0"
+
+parameters:
+  - name: task_name
+    description: "Name of the task"
+    required: true
+
+states:
+  - id: start
+    type: initial
+    transitions: [enter_blocked, exit_blocked, warn_only, open]
+
+  # Entering this state is blocked: its on_enter gate fails with severity=error.
+  - id: enter_blocked
+    description: "Target whose entry gate fails"
+    transitions: [open]
+    on_enter:
+      validate:
+        - command: "echo missing"
+          expect: empty
+          message: "on_enter gate must block entry"
+          severity: error
+
+  # Leaving this state is blocked: its on_exit gate fails with severity=error.
+  - id: exit_blocked
+    description: "State whose exit gate fails"
+    transitions: [open]
+    on_exit:
+      validate:
+        - command: "echo still-dirty"
+          expect: empty
+          message: "on_exit gate must block departure"
+          severity: error
+
+  # A failing gate at severity=warning must NOT block the transition.
+  - id: warn_only
+    description: "Target whose entry gate fails at warning severity"
+    transitions: [open]
+    on_enter:
+      validate:
+        - command: "echo advisory"
+          expect: empty
+          message: "warning gate must not block"
+          severity: warning
+
+  - id: open
+    description: "Ungated state"
+    transitions: [done, enter_blocked]
+
+  - id: done
+    type: terminal
