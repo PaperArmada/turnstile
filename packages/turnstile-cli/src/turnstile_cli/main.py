@@ -32,6 +32,7 @@ from turnstile_core.schema import export_schemas
 from turnstile_core.template import scaffold_package
 
 from turnstile_cli.principles import PRINCIPLES
+from turnstile_cli.starters import STARTER_REGISTRY, STARTERS
 
 
 TURNSTILE_REPO_URL = "https://github.com/PaperArmada/turnstile.git"
@@ -1032,6 +1033,20 @@ def init(
             proc_dir.mkdir(parents=True)
             created.append(".processes/")
 
+        # Curated starter pack (bundled with the package, written offline).
+        # Existing files are never overwritten; `turnstile update` is the
+        # refresh path.
+        starters_written = 0
+        for filename, content in STARTERS.items():
+            target = proc_dir / filename
+            if not target.exists():
+                target.write_text(content)
+                starters_written += 1
+        if starters_written:
+            created.append(
+                f".processes/ ({starters_written} starter definitions)"
+            )
+
         # Design principles
         principles_dir = proc_dir / "principles"
         if not principles_dir.exists():
@@ -1042,11 +1057,11 @@ def init(
                 written += 1
             created.append(f".processes/principles/ ({written} files)")
 
-        # registry.yaml
+        # registry.yaml — registers the starter pack and sets enforcement mode
         registry_path = proc_dir / "registry.yaml"
         if not registry_path.exists():
             registry_path.write_text(
-                f'version: "1.0"\n\nsettings:\n  enforcement: {enforce_mode}\n'
+                STARTER_REGISTRY.replace("__ENFORCEMENT__", enforce_mode)
             )
             created.append(".processes/registry.yaml")
     else:
