@@ -986,12 +986,15 @@ class Engine:
         data, and optionally transitions to a target state.
 
         A transition requested here runs the same validation gates as an
-        ordinary transition. If a blocking gate fails, the signal is still
-        recorded (it genuinely arrived, and discarding it would lose an
-        external fact) and the instance stops waiting, but the state change is
-        refused and reported. The instance is left at the wait state with
-        waiting cleared, so it can be advanced by a normal transition once the
-        gate's condition is met, rather than being stranded.
+        ordinary transition. If a blocking gate fails, the call is a no-op
+        mirroring a blocked ordinary transition: nothing is written, the
+        instance stays in the wait state (waiting is NOT cleared, the signal is
+        NOT consumed), and the result reports success=False with
+        still_waiting=True. The same signal can then be delivered again through
+        this method once the gate's condition is met, which re-runs the gates
+        and completes the transition with the signal's attribution intact. Do
+        not advance a refused instance with transition(); that would drop the
+        signal name and data from the recorded history.
 
         Args:
             instance_id: The ID of the waiting process instance.

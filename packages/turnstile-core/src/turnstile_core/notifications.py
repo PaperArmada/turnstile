@@ -13,6 +13,10 @@ logger = logging.getLogger(__name__)
 
 _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
+# Old-style {name} template token (not the current ${name}), used to warn
+# about templates written for the pre-env-passing substitution.
+_LEGACY_TOKEN_RE = re.compile(r"(?<!\$)\{[A-Za-z_]\w*\}")
+
 
 async def run_notification(
     command_template: str,
@@ -31,6 +35,13 @@ async def run_notification(
     Returns a result dict with success, output, and error info.
     """
     command = command_template
+    if _LEGACY_TOKEN_RE.search(command_template):
+        logger.warning(
+            "Notification template uses a legacy {name} token; the syntax is "
+            "now ${name}, expanded by the shell from environment variables. "
+            "The old token will be emitted literally. Template: %s",
+            command_template,
+        )
     env = os.environ.copy()
     for key, value in context.items():
         if _ENV_NAME_RE.match(key):

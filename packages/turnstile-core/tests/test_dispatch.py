@@ -368,3 +368,102 @@ class TestParameterForwarding:
             assert "metadata" in msg
         finally:
             loop.close()
+
+
+# ---------------------------------------------------------------------------
+# Security: a parent cannot inject an environment-significant name into a
+# dispatched child's gate shell via parameter_map.
+# ---------------------------------------------------------------------------
+
+# The child's gate reads $PATH. It declares only task_name, so its gate
+# environment is restricted to task_name (see Engine._gate_params). The parent
+# below maps an env-significant key (PATH) to a caller-controlled value; that
+# key must be dropped from the child's gate environment because the child never
+# declared it. This pins the child-side protection, which otherwise holds only
+# incidentally because child gates happen to reuse _gate_params.
+ENV_PROBE_CHILD = {
+    "name": "env-probe-child",
+    "description": "Child whose gate reads PATH",
+    "version": "1.0.0",
+    "parameters": [
+        {"name": "task_name", "description": "What to do", "required": True},
+    ],
+    "states": [
+        {"id": "start", "type": "initial", "transitions": ["probe"]},
+        {
+            "id": "probe",
+            "description": "Gate reads the ambient PATH",
+            "transitions": ["done"],
+            "on_enter": {
+                "validate": [
+                    {"command": 'echo "$PATH"', "expect": "not_empty"},
+                ]
+            },
+        },
+        {"id": "done", "type": "terminal"},
+    ],
+}
+
+INJECTING_PARENT = {
+    "name": "injecting-coordinator",
+    "description": "Coordinator that tries to set the child's PATH",
+    "version": "1.0.0",
+    "parameters": [
+        {"name": "evil", "description": "Attacker-controlled value"},
+    ],
+    "states": [
+        {"id": "start", "type": "initial", "transitions": ["triage"]},
+        {"id": "triage", "transitions": ["dispatch_work"]},
+        {
+            "id": "dispatch_work",
+            "type": "dispatch",
+            "process": "env-probe-child",
+            # Map the child's declared param, and also try to smuggle an
+            # env-significant PATH key carrying the attacker value.
+            "parameter_map": {
+                "task_name": "do work",
+                "PATH": "${evil}",
+            },
+            "immediate": "ready",
+        },
+        {"id": "ready", "transitions": ["shutdown"]},
+        {"id": "shutdown", "type": "terminal"},
+    ],
+}
+
+
+@pytest.fixture
+def injecting_engine(tmp_path):
+    proc_dir = tmp_path / ".processes"
+    proc_dir.mkdir()
+    (proc_dir / "injecting-coordinator.yaml").write_text(yaml.dump(INJECTING_PARENT))
+    (proc_dir / "env-probe-child.yaml").write_text(yaml.dump(ENV_PROBE_CHILD))
+    return Engine(tmp_path)
+
+
+class TestDispatchEnvInjection:
+    def test_parent_cannot_set_child_gate_path(self, injecting_engine):
+        import asyncio
+        loop = asyncio.new_event_loop()
+        try:
+            engine = injecting_engine
+            result = engine.start(
+                "injecting-coordinator", {"evil": "/attacker/injected"}
+            )
+            pid = result["instance_id"]
+
+            loop.run_until_complete(engine.transition(pid, "triage"))
+            r = loop.run_until_complete(engine.transition(pid, "dispatch_work"))
+            child_id = r.subprocess_started
+
+            # The parent DID manage to set a child parameter named PATH...
+            child = engine._store.load(child_id)
+            assert child.parameters.get("PATH") == "/attacker/injected"
+
+            # ...but it must NOT reach the child's gate environment, because
+            # the child does not declare PATH.
+            gate = loop.run_until_complete(engine.transition(child_id, "probe"))
+            gate_output = gate.validation_results[0]["output"]
+            assert "/attacker/injected" not in gate_output
+        finally:
+            loop.close()

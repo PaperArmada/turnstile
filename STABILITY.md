@@ -37,6 +37,9 @@ These will not change in backward-incompatible ways without a deprecation notice
 
 **Registry**
 - `extends`, `local`, `settings` (state_dir, require_override_reason, log_retention_days, enforcement, notifications)
+- Notification templates use `${name}` shell syntax (expanded from environment
+  variables). The earlier `{name}` brace form is no longer substituted; a
+  template still using it logs a warning and emits the literal text.
 
 ## Experimental
 

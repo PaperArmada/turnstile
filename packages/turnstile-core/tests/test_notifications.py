@@ -67,6 +67,20 @@ class TestRunNotification:
         assert not marker.exists()
 
     @pytest.mark.asyncio
+    async def test_legacy_brace_token_warns(self, tmp_path, caplog):
+        """A {name} template (old syntax) warns; ${name} does not."""
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            await run_notification("echo '{name}'", {"name": "x"}, tmp_path)
+        assert any("legacy" in r.message for r in caplog.records)
+
+        caplog.clear()
+        with caplog.at_level(logging.WARNING):
+            await run_notification('echo "${name}"', {"name": "x"}, tmp_path)
+        assert not any("legacy" in r.message for r in caplog.records)
+
+    @pytest.mark.asyncio
     async def test_failed_command(self, tmp_path):
         result = await run_notification("exit 1", {}, tmp_path)
         assert result["success"] is False
