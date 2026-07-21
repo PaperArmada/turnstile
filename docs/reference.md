@@ -328,15 +328,17 @@ Each instance is a JSON file containing the current state, full history, paramet
 
 ## Enforcement
 
-Turnstile can enforce process compliance by integrating with Claude Code's PreToolUse hooks. When enabled, file mutations (Write, Edit) are gated on having an active process instance.
+Turnstile can enforce process compliance by integrating with Claude Code's PreToolUse hooks. When enabled, the Edit and Write tools are gated on having an active process instance whose current state permits edits.
+
+The hook matches the Edit and Write tools; it does not parse the contents of shell commands. Command-level Bash file mutations are therefore outside its scope — a state can deny the Bash tool wholesale through `permissions`, but Turnstile does not inspect shell command text to decide whether a particular command mutates a file.
 
 Three modes:
 
 | Mode | Behavior |
 |------|----------|
 | `off` | No enforcement (default) |
-| `monitor` | Warns when no active process, but allows the action |
-| `enforce` | Blocks file mutations when no active process |
+| `monitor` | Warns when no active process (or the state forbids edits), but allows the action |
+| `enforce` | Blocks Edit/Write when no active process permits the edit |
 
 ```bash
 # Enable enforcement (updates registry.yaml and installs Claude Code hook)
@@ -352,7 +354,7 @@ turnstile enforce off
 turnstile enforce status
 ```
 
-Enforcement is configured in `registry.yaml` under `settings.enforcement` and works via a PreToolUse hook in `.claude/settings.json` that calls `turnstile guard`. The guard fails open on any error to avoid blocking the agent unexpectedly.
+Enforcement is configured in `registry.yaml` under `settings.enforcement` and works via a PreToolUse hook in `.claude/settings.json` that calls `turnstile guard`. When several process instances are active, the most restrictive one wins: an edit is blocked if any active instance forbids it (a second, more permissive instance cannot lift another's restriction). The guard fails open on unexpected internal errors so a bug never hard-blocks the agent, with one deliberate exception: a corrupt or unreadable state file is treated as unknown state and blocks in `enforce` mode (warns in `monitor`) rather than being silently ignored.
 
 ## Starter pack
 
