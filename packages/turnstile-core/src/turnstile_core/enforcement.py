@@ -189,31 +189,40 @@ def _format_guidance(contexts: list[EnforcementContext], action: str) -> str:
     return "\n".join(lines)
 
 
+def _first_path_blocker(
+    contexts: list[EnforcementContext],
+    file_path: str,
+    project_root: Path,
+) -> EnforcementContext | None:
+    """Return the first context that restricts edit_paths and does not match
+    file_path, or None if every restricting context permits it.
+
+    A context with no edit_paths imposes no path restriction. Under
+    most-restrictive-wins across concurrent instances, a file is editable only
+    if it satisfies every instance that declares edit_paths — a single
+    permissive instance must not lift another's restriction (SECURITY-NOTES F1).
+
+    Patterns are matched relative to project_root using fnmatch.
+    """
+    try:
+        rel = str(Path(file_path).resolve().relative_to(project_root.resolve()))
+    except ValueError:
+        rel = file_path  # Already relative or outside project
+    for ctx in contexts:
+        if not ctx.permissions.edit_paths:
+            continue  # No path restriction from this context
+        if not any(fnmatch(rel, pattern) for pattern in ctx.permissions.edit_paths):
+            return ctx
+    return None
+
+
 def _check_edit_paths(
     contexts: list[EnforcementContext],
     file_path: str,
     project_root: Path,
 ) -> bool:
-    """Check if file_path matches edit_paths for any permitting context.
-
-    Returns True if:
-    - No context has edit_paths restrictions (empty list), or
-    - The file path matches at least one pattern in at least one context.
-
-    Patterns are matched relative to project_root using fnmatch.
-    """
-    for ctx in contexts:
-        if not ctx.permissions.edit_paths:
-            return True  # No restrictions on this context
-        # Make file_path relative to project root for matching
-        try:
-            rel = str(Path(file_path).resolve().relative_to(project_root.resolve()))
-        except ValueError:
-            rel = file_path  # Already relative or outside project
-        for pattern in ctx.permissions.edit_paths:
-            if fnmatch(rel, pattern):
-                return True
-    return False
+    """True only if file_path is permitted by every restricting context."""
+    return _first_path_blocker(contexts, file_path, project_root) is None
 
 
 def _suggest_processes(
@@ -311,7 +320,28 @@ def check_enforcement(
     # Load active instances
     state_dir = project_root / registry.settings.state_dir
     store = StateStore(state_dir)
-    active = store.list_active()
+    active, corrupt = store.list_active_with_errors()
+
+    # A corrupt/unreadable state file means enforcement state is unknown.
+    # Never treat that as "no restrictions" — that is the fail-open chain
+    # where one torn JSON silently disables enforce mode (SECURITY-NOTES F5).
+    if corrupt:
+        names = ", ".join(p.name for p in corrupt)
+        reason = (
+            f"Cannot read {len(corrupt)} process state file(s) "
+            f"({names}); enforcement state is unknown"
+        )
+        guidance = (
+            "A state file under .process-state/active/ is corrupt or "
+            "unreadable. Inspect or remove it, then retry."
+        )
+        if mode == "monitor":
+            return EnforcementResult(
+                decision="warn", reason=reason, guidance=guidance
+            )
+        return EnforcementResult(
+            decision="deny", reason=reason, guidance=guidance
+        )
 
     if not active:
         reason = f"No active turnstile process ({mode} mode)"
@@ -350,79 +380,79 @@ def check_enforcement(
             context=contexts, guidance=guidance,
         )
 
-    # Check the action permission on non-suspended instances
-    permitted_by = [
+    # Most-restrictive-wins across concurrent instances: the action is
+    # permitted only if EVERY non-suspended instance permits it. Otherwise a
+    # second, more permissive instance could lift a restrictive state — a
+    # verified bypass of per-state permissions (SECURITY-NOTES F1).
+    denied_by = [
         c for c in non_suspended
-        if getattr(c.permissions, action, True)
+        if not getattr(c.permissions, action, True)
     ]
 
-    if permitted_by:
-        # Check path restrictions if file_path is provided
-        if file_path and action == "edit":
-            path_ok = _check_edit_paths(permitted_by, file_path, project_root)
-            if not path_ok:
-                allowed_patterns = permitted_by[0].permissions.edit_paths
-                reason = (
-                    f"File '{file_path}' is outside allowed edit paths "
-                    f"for {permitted_by[0].process_name} @ "
-                    f"{permitted_by[0].current_state}: "
-                    f"{', '.join(allowed_patterns)}"
-                )
-                if mode == "monitor":
-                    return EnforcementResult(
-                        decision="warn", reason=reason,
-                        context=contexts, guidance=guidance,
-                    )
-                return EnforcementResult(
-                    decision="deny", reason=reason,
-                    context=contexts, guidance=guidance,
-                )
-
-        # Check catalogue mismatch: active process exists but doesn't
-        # match the catalogue for the file being edited (advisory only)
-        if file_path and registry.settings.path_catalogue:
-            catalogue_procs = _match_catalogue(
-                file_path, registry.settings.path_catalogue,
+    if denied_by:
+        blocked_ctx = denied_by[0]
+        edit_states = [t for t in blocked_ctx.available_transitions]
+        suggestion = ""
+        if edit_states:
+            suggestion = (
+                f" Transition to a state that allows edits first: "
+                f"{', '.join(edit_states)}"
             )
-            if catalogue_procs:
-                active_names = {c.process_name for c in permitted_by}
-                if not active_names & set(catalogue_procs):
-                    guidance += (
-                        f"\n  Catalogue hint: '{file_path}' is typically "
-                        f"covered by: {', '.join(catalogue_procs)}"
-                    )
-
-        # At least one active instance permits this action in its current state
-        return EnforcementResult(
-            decision="allow",
-            reason=f"Permitted by {permitted_by[0].process_name} @ {permitted_by[0].current_state}",
-            context=contexts,
-            guidance=guidance,
+        reason = (
+            f"State '{blocked_ctx.current_state}' in {blocked_ctx.process_name} "
+            f"does not allow {action}.{suggestion}"
         )
-
-    # Action not permitted in any active instance's current state
-    blocked_ctx = non_suspended[0]
-    edit_states = [
-        t for t in blocked_ctx.available_transitions
-    ]
-    suggestion = ""
-    if edit_states:
-        suggestion = (
-            f" Transition to a state that allows edits first: "
-            f"{', '.join(edit_states)}"
-        )
-
-    reason = (
-        f"State '{blocked_ctx.current_state}' in {blocked_ctx.process_name} "
-        f"does not allow {action}.{suggestion}"
-    )
-
-    if mode == "monitor":
+        if mode == "monitor":
+            return EnforcementResult(
+                decision="warn", reason=reason,
+                context=contexts, guidance=guidance,
+            )
         return EnforcementResult(
-            decision="warn", reason=reason,
+            decision="deny", reason=reason,
             context=contexts, guidance=guidance,
         )
+
+    # Every non-suspended instance permits the action. Enforce path
+    # restrictions with the same rule: the file must satisfy every instance
+    # that declares edit_paths.
+    if file_path and action == "edit":
+        blocker = _first_path_blocker(non_suspended, file_path, project_root)
+        if blocker is not None:
+            allowed_patterns = blocker.permissions.edit_paths
+            reason = (
+                f"File '{file_path}' is outside allowed edit paths "
+                f"for {blocker.process_name} @ {blocker.current_state}: "
+                f"{', '.join(allowed_patterns)}"
+            )
+            if mode == "monitor":
+                return EnforcementResult(
+                    decision="warn", reason=reason,
+                    context=contexts, guidance=guidance,
+                )
+            return EnforcementResult(
+                decision="deny", reason=reason,
+                context=contexts, guidance=guidance,
+            )
+
+    # Catalogue mismatch: active process exists but doesn't match the
+    # catalogue for the file being edited (advisory only).
+    if file_path and registry.settings.path_catalogue:
+        catalogue_procs = _match_catalogue(
+            file_path, registry.settings.path_catalogue,
+        )
+        if catalogue_procs:
+            active_names = {c.process_name for c in non_suspended}
+            if not active_names & set(catalogue_procs):
+                guidance += (
+                    f"\n  Catalogue hint: '{file_path}' is typically "
+                    f"covered by: {', '.join(catalogue_procs)}"
+                )
+
+    # Every non-suspended instance permits the action in its current state.
+    allower = non_suspended[0]
     return EnforcementResult(
-        decision="deny", reason=reason,
-        context=contexts, guidance=guidance,
+        decision="allow",
+        reason=f"Permitted by {allower.process_name} @ {allower.current_state}",
+        context=contexts,
+        guidance=guidance,
     )

@@ -9,6 +9,7 @@ import yaml
 
 from turnstile_core.engine import Engine
 from turnstile_core.enforcement import check_enforcement
+from turnstile_core.persistence import StateStore
 from turnstile_core.guard import (
     generate_hook_config,
     install_enforcement,
@@ -253,8 +254,13 @@ class TestStatePermissions:
         assert result.decision == "deny"
         assert "does not allow edit" in result.reason
 
-    def test_multiple_instances_one_permits(self, tmp_path):
-        """If any non-suspended instance permits the action, allow."""
+    def test_multiple_instances_most_restrictive_wins(self, tmp_path):
+        """A restrictive instance is not lifted by a permissive one (F1).
+
+        Two concurrent instances: one in an edit=false state, one that
+        permits edits. Most-restrictive-wins means the edit is denied — a
+        second permissive instance must not neutralize a restrictive state.
+        """
         proc_dir = tmp_path / ".processes"
         proc_dir.mkdir(exist_ok=True)
 
@@ -302,8 +308,57 @@ class TestStatePermissions:
         engine.start("editable", {"task": "b"})
 
         result = check_enforcement(tmp_path, action="edit")
-        assert result.decision == "allow"
-        assert "editable" in result.reason
+        assert result.decision == "deny"
+        assert "read-only" in result.reason
+
+    def test_disjoint_edit_paths_are_intersected(self, tmp_path):
+        """With two instances restricting edit_paths, a file must satisfy both.
+
+        Instance A allows only src/**, instance B only docs/**. Editing
+        src/app.py is denied because B forbids it — path restrictions are
+        intersected across concurrent instances, not unioned (F1).
+        """
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir(exist_ok=True)
+
+        def _defn(name, pattern):
+            return {
+                "name": name,
+                "version": "1.0.0",
+                "parameters": [{"name": "task", "required": True}],
+                "states": [
+                    {
+                        "id": "start",
+                        "type": "initial",
+                        "permissions": {"edit": True, "edit_paths": [pattern]},
+                        "transitions": ["done"],
+                    },
+                    {"id": "done", "type": "terminal"},
+                ],
+            }
+
+        (proc_dir / "src-only.yaml").write_text(
+            yaml.dump(_defn("src-only", "src/**"), default_flow_style=False)
+        )
+        (proc_dir / "docs-only.yaml").write_text(
+            yaml.dump(_defn("docs-only", "docs/**"), default_flow_style=False)
+        )
+        (proc_dir / "registry.yaml").write_text(
+            yaml.dump(
+                {"version": "1.0", "settings": {"enforcement": "enforce"}},
+                default_flow_style=False,
+            )
+        )
+
+        engine = Engine(tmp_path)
+        engine.start("src-only", {"task": "a"})
+        engine.start("docs-only", {"task": "b"})
+
+        result = check_enforcement(
+            tmp_path, action="edit", file_path=str(tmp_path / "src" / "app.py")
+        )
+        assert result.decision == "deny"
+        assert "docs-only" in result.reason
 
 
 class TestSmartSuggestions:
@@ -909,3 +964,51 @@ class TestPathCatalogue:
         )
         assert "simple" in result.guidance
         assert "quick-fix" in result.guidance
+
+
+class TestCorruptStateFile:
+    """A torn/unreadable state file must not silently disable enforcement (F5)."""
+
+    def _corrupt_active_file(self, tmp_path):
+        """Write an unparseable file into .process-state/active/."""
+        active_dir = tmp_path / ".process-state" / "active"
+        active_dir.mkdir(parents=True, exist_ok=True)
+        (active_dir / "torn-abc123.json").write_text('{"instance_id": "abc12')
+
+    def test_enforce_mode_denies_on_corrupt_file(self, tmp_path):
+        """In enforce mode, an unreadable state file denies (fail closed).
+
+        A valid permissive instance is present too: the corrupt file could be
+        hiding a restrictive instance, so its unreadability must override the
+        permissive one rather than be silently dropped.
+        """
+        engine = _setup_project(tmp_path, enforcement="enforce")
+        engine.start("simple", {"task_name": "ok"})
+        self._corrupt_active_file(tmp_path)
+
+        result = check_enforcement(tmp_path, action="edit")
+        assert result.decision == "deny"
+        assert "unknown" in result.reason.lower()
+
+    def test_monitor_mode_warns_on_corrupt_file(self, tmp_path):
+        """In monitor mode, an unreadable state file warns, does not allow."""
+        engine = _setup_project(tmp_path, enforcement="monitor")
+        engine.start("simple", {"task_name": "ok"})
+        self._corrupt_active_file(tmp_path)
+
+        result = check_enforcement(tmp_path, action="edit")
+        assert result.decision == "warn"
+        assert "unknown" in result.reason.lower()
+
+    def test_list_active_skips_corrupt_and_keeps_valid(self, tmp_path):
+        """list_active tolerates a corrupt file and still returns valid ones."""
+        engine = _setup_project(tmp_path, enforcement="enforce")
+        engine.start("simple", {"task_name": "ok"})
+        self._corrupt_active_file(tmp_path)
+
+        store = StateStore(tmp_path / ".process-state")
+        instances, corrupt = store.list_active_with_errors()
+        assert len(instances) == 1
+        assert len(corrupt) == 1
+        # The convenience wrapper never raises on the corrupt file.
+        assert len(store.list_active()) == 1

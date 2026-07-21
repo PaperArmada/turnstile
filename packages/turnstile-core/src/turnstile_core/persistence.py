@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,6 +12,8 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from turnstile_core.errors import InstanceNotFoundError
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -185,12 +188,34 @@ class StateStore:
         instance.updated_at = _now_iso()
         self._write(instance)
 
-    def list_active(self) -> list[ProcessInstance]:
-        """List all active process instances."""
-        instances = []
+    def list_active_with_errors(
+        self,
+    ) -> tuple[list[ProcessInstance], list[Path]]:
+        """List active instances, tolerating unreadable files.
+
+        Returns ``(instances, corrupt_paths)``. A file that cannot be parsed
+        as a valid instance is skipped and its path recorded, never raised, so
+        one torn JSON does not blind the whole listing. Callers that make
+        security decisions (see enforcement.check_enforcement) must treat a
+        non-empty corrupt list as "state unknown", not "no restrictions"
+        (SECURITY-NOTES F5).
+        """
+        instances: list[ProcessInstance] = []
+        corrupt: list[Path] = []
         for path in sorted(self.active_dir.glob("*.json")):
-            data = json.loads(path.read_text())
-            instances.append(ProcessInstance(**data))
+            try:
+                data = json.loads(path.read_text())
+                instances.append(ProcessInstance(**data))
+            except Exception:
+                logger.warning(
+                    "Skipping unreadable process state file: %s", path
+                )
+                corrupt.append(path)
+        return instances, corrupt
+
+    def list_active(self) -> list[ProcessInstance]:
+        """List all active process instances, skipping unreadable ones."""
+        instances, _ = self.list_active_with_errors()
         return instances
 
     def complete(self, instance: ProcessInstance) -> None:
