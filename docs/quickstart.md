@@ -56,7 +56,7 @@ states:
 From your project directory:
 
 ```bash
-uvx --python 3.12 --from "turnstile-cli @ git+https://github.com/PaperArmada/turnstile.git#subdirectory=packages/turnstile-cli" turnstile init
+uvx --python 3.12 --from "turnstile-cli @ git+https://github.com/PaperArmada/turnstile.git@v0.1.0#subdirectory=packages/turnstile-cli" turnstile init
 ```
 
 This generates:

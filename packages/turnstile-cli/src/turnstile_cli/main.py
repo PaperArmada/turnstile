@@ -17,6 +17,7 @@ from turnstile_core.engine import Engine
 from turnstile_core.guard import (
     _find_turnstile_root,
     install_enforcement,
+    pin_repo_url,
     run_guard,
     update_registry_enforcement,
 )
@@ -48,7 +49,7 @@ def _mcp_config_uvx(repo_url: str) -> dict:
                 "args": [
                     "--python", "3.12",
                     "--from",
-                    f"turnstile-mcp @ git+{repo_url}"
+                    f"turnstile-mcp @ git+{pin_repo_url(repo_url)}"
                     f"#subdirectory=packages/turnstile-mcp",
                     "python", "-m", "turnstile_mcp.server",
                 ],

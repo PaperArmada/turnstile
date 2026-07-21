@@ -118,11 +118,26 @@ def run_guard() -> None:
 # ---------------------------------------------------------------------------
 
 
+TURNSTILE_REF = "v0.1.0"
+
+
+def pin_repo_url(repo_url: str, ref: str = TURNSTILE_REF) -> str:
+    """Pin a git repo URL to a release tag for reproducible uvx installs.
+
+    uvx caches by ref, so an unpinned URL freezes on whatever commit it first
+    resolved; pinning to a tag makes upgrades explicit (bump the tag and
+    `uvx --refresh`). A URL that already carries a ref is returned unchanged.
+    """
+    if "@" in repo_url.rsplit("/", 1)[-1]:
+        return repo_url
+    return f"{repo_url}@{ref}"
+
+
 def _guard_command_uvx(repo_url: str) -> str:
-    """Build the guard command using uvx (no local clone needed)."""
+    """Build the guard command using uvx, pinned to the release tag."""
     return (
         f'uvx --python 3.12 --from "turnstile-cli @ '
-        f'git+{repo_url}#subdirectory=packages/turnstile-cli" '
+        f'git+{pin_repo_url(repo_url)}#subdirectory=packages/turnstile-cli" '
         f'turnstile guard'
     )
 

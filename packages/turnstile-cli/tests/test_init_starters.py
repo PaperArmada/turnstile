@@ -11,7 +11,8 @@ from pathlib import Path
 import yaml
 from click.testing import CliRunner
 
-from turnstile_cli.main import cli
+from turnstile_core.guard import TURNSTILE_REF, _guard_command_uvx, pin_repo_url
+from turnstile_cli.main import _mcp_config_uvx, cli
 from turnstile_cli.starters import STARTER_REGISTRY, STARTERS
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -107,3 +108,29 @@ def test_init_does_not_overwrite_existing_definitions(tmp_path):
     )
     assert result.exit_code == 0, result.output
     assert (proc_dir / "bug-fix.yaml").read_text() == custom
+
+
+class TestReleasePinning:
+    """uvx install URLs must pin to the release tag for reproducibility."""
+
+    DEFAULT = "https://github.com/PaperArmada/turnstile.git"
+
+    def test_pin_repo_url_appends_ref(self):
+        assert pin_repo_url(self.DEFAULT) == f"{self.DEFAULT}@{TURNSTILE_REF}"
+
+    def test_pin_repo_url_leaves_existing_ref(self):
+        assert pin_repo_url(f"{self.DEFAULT}@main") == f"{self.DEFAULT}@main"
+
+    def test_pin_repo_url_handles_ssh_at(self):
+        ssh = "git@github.com:PaperArmada/turnstile.git"
+        assert pin_repo_url(ssh) == f"{ssh}@{TURNSTILE_REF}"
+
+    def test_mcp_config_is_pinned(self):
+        cfg = _mcp_config_uvx(self.DEFAULT)
+        from_arg = next(
+            a for a in cfg["mcpServers"]["turnstile"]["args"] if "git+" in a
+        )
+        assert f"@{TURNSTILE_REF}#subdirectory" in from_arg
+
+    def test_guard_command_is_pinned(self):
+        assert f"@{TURNSTILE_REF}#subdirectory" in _guard_command_uvx(self.DEFAULT)
