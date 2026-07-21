@@ -57,6 +57,20 @@ class EnforcementResult:
     guidance: str = ""
 
 
+def _unknown_state_result(
+    mode: str, reason: str, guidance: str
+) -> EnforcementResult:
+    """Fail closed when enforcement state cannot be determined.
+
+    Any inability to resolve the configuration or an active instance's
+    definition means we cannot prove the action is permitted; treat it like a
+    corrupt state file — deny in enforce, warn in monitor — rather than letting
+    the error propagate to the guard's fail-open handler (SECURITY-NOTES F5).
+    """
+    decision = "warn" if mode == "monitor" else "deny"
+    return EnforcementResult(decision=decision, reason=reason, guidance=guidance)
+
+
 def _build_context(
     instance: ProcessInstance,
     definitions: dict[str, ProcessDefinition],
@@ -311,7 +325,20 @@ def check_enforcement(
     Returns:
         EnforcementResult with decision, reason, context, and guidance.
     """
-    registry = load_registry(project_root)
+    try:
+        registry = load_registry(project_root)
+    except Exception as exc:
+        # The registry itself is unreadable, so we cannot even determine the
+        # enforcement mode. We cannot prove enforcement is off, so fail closed
+        # rather than let the guard swallow the error into an allow (F5).
+        return EnforcementResult(
+            decision="deny",
+            reason=(
+                "Cannot read .processes/registry.yaml; enforcement "
+                f"configuration is unknown ({exc})"
+            ),
+            guidance="registry.yaml is corrupt or unreadable. Fix it, then retry.",
+        )
     mode = registry.settings.enforcement
 
     if mode == "off":
@@ -324,23 +351,15 @@ def check_enforcement(
 
     # A corrupt/unreadable state file means enforcement state is unknown.
     # Never treat that as "no restrictions" — that is the fail-open chain
-    # where one torn JSON silently disables enforce mode (SECURITY-NOTES F5).
+    # where one torn file silently disables enforce mode (SECURITY-NOTES F5).
     if corrupt:
         names = ", ".join(p.name for p in corrupt)
-        reason = (
+        return _unknown_state_result(
+            mode,
             f"Cannot read {len(corrupt)} process state file(s) "
-            f"({names}); enforcement state is unknown"
-        )
-        guidance = (
+            f"({names}); enforcement state is unknown",
             "A state file under .process-state/active/ is corrupt or "
-            "unreadable. Inspect or remove it, then retry."
-        )
-        if mode == "monitor":
-            return EnforcementResult(
-                decision="warn", reason=reason, guidance=guidance
-            )
-        return EnforcementResult(
-            decision="deny", reason=reason, guidance=guidance
+            "unreadable. Inspect or remove it, then retry.",
         )
 
     if not active:
@@ -357,9 +376,35 @@ def check_enforcement(
             decision="deny", reason=reason, guidance=guidance
         )
 
-    # Load definitions to resolve state permissions
-    discovered = discover_definitions_full(project_root)
+    # Load definitions to resolve state permissions. A definition that fails
+    # to load (or a registry-listed local definition that is corrupt) leaves us
+    # unable to resolve permissions; fail closed rather than default permissive.
+    try:
+        discovered = discover_definitions_full(project_root)
+    except Exception as exc:
+        return _unknown_state_result(
+            mode,
+            f"Cannot load process definitions; enforcement state is "
+            f"unknown ({exc})",
+            "A process definition is corrupt or unreadable. Fix it, then retry.",
+        )
     definitions = {name: d.definition for name, d in discovered.items()}
+
+    # An active instance whose definition cannot be resolved would otherwise
+    # get the permissive default in _build_context, silently lifting a
+    # restrictive state. Treat it as unknown enforcement state (F5, finding 2).
+    unresolved = sorted(
+        {inst.process_name for inst in active if inst.process_name not in definitions}
+    )
+    if unresolved:
+        return _unknown_state_result(
+            mode,
+            f"Cannot resolve definition(s) for active instance(s): "
+            f"{', '.join(unresolved)}; enforcement state is unknown",
+            "An active instance's process definition is missing or "
+            "unreadable. Restore the definition (or abandon the instance), "
+            "then retry.",
+        )
 
     contexts = [_build_context(inst, definitions) for inst in active]
     guidance = _format_guidance(contexts, action)

@@ -128,6 +128,7 @@ def pin_repo_url(repo_url: str, ref: str = TURNSTILE_REF) -> str:
     resolved; pinning to a tag makes upgrades explicit (bump the tag and
     `uvx --refresh`). A URL that already carries a ref is returned unchanged.
     """
+    repo_url = repo_url.rstrip("/")
     if "@" in repo_url.rsplit("/", 1)[-1]:
         return repo_url
     return f"{repo_url}@{ref}"

@@ -1012,3 +1012,66 @@ class TestCorruptStateFile:
         assert len(corrupt) == 1
         # The convenience wrapper never raises on the corrupt file.
         assert len(store.list_active()) == 1
+
+
+class TestFailClosedOnUnknownConfig:
+    """A torn registry or definition must not fail open either (F5, full).
+
+    The state-file case is covered above; these pin the other two inputs the
+    enforcement decision depends on. Pre-fix, each raised (registry, definition)
+    or defaulted permissive (unresolved definition) and the guard's outer
+    except swallowed it into an allow.
+    """
+
+    def _project(self, tmp_path, mode="enforce"):
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir(exist_ok=True)
+        shutil.copy(FIXTURES / "simple.yaml", proc_dir / "simple.yaml")
+        (proc_dir / "registry.yaml").write_text(
+            yaml.dump(
+                {"version": "1.0", "local": ["simple"],
+                 "settings": {"enforcement": mode}},
+                default_flow_style=False,
+            )
+        )
+        return proc_dir
+
+    def test_corrupt_registry_denies(self, tmp_path):
+        """A torn registry.yaml denies — the mode is indeterminable."""
+        proc_dir = self._project(tmp_path, "enforce")
+        (proc_dir / "registry.yaml").write_text(
+            "version: '1.0'\nsettings:\n  enforcement: enforce\n  bad: [x\n"
+        )
+        result = check_enforcement(tmp_path, action="edit")
+        assert result.decision == "deny"
+        assert "registry" in result.reason.lower()
+
+    def test_corrupt_definition_denies_in_enforce(self, tmp_path):
+        proc_dir = self._project(tmp_path, "enforce")
+        (proc_dir / "simple.yaml").write_text("name: simple\nstates: [bad\n")
+        result = check_enforcement(tmp_path, action="edit")
+        assert result.decision == "deny"
+
+    def test_corrupt_definition_warns_in_monitor(self, tmp_path):
+        proc_dir = self._project(tmp_path, "monitor")
+        (proc_dir / "simple.yaml").write_text("name: simple\nstates: [bad\n")
+        result = check_enforcement(tmp_path, action="edit")
+        assert result.decision == "warn"
+
+    def test_unresolved_definition_for_active_instance_denies(self, tmp_path):
+        """A live instance whose definition vanished must not default permissive."""
+        proc_dir = self._project(tmp_path, "enforce")
+        Engine(tmp_path).start("simple", {"task_name": "x"})
+        (proc_dir / "simple.yaml").unlink()
+        result = check_enforcement(tmp_path, action="edit")
+        assert result.decision == "deny"
+        assert "resolve" in result.reason.lower()
+
+    def test_unresolved_definition_for_active_instance_warns_in_monitor(
+        self, tmp_path
+    ):
+        proc_dir = self._project(tmp_path, "monitor")
+        Engine(tmp_path).start("simple", {"task_name": "x"})
+        (proc_dir / "simple.yaml").unlink()
+        result = check_enforcement(tmp_path, action="edit")
+        assert result.decision == "warn"

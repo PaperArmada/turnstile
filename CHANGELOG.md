@@ -41,8 +41,10 @@ Initial public release.
   restricted to declared parameter names.
 - Concurrent process instances resolve most-restrictive-wins: a permissive
   instance cannot lift another instance's edit restriction.
-- A corrupt or unreadable state file is treated as unknown state (blocks in
-  `enforce`, warns in `monitor`) instead of silently disabling enforcement.
+- A corrupt or unreadable state, registry, or definition file is treated as
+  unknown enforcement state (blocks in `enforce`, warns in `monitor`) instead of
+  silently disabling enforcement; an active instance whose definition cannot be
+  resolved no longer defaults to permissive.
 - Signal-driven transitions run the same validation gates as ordinary
   transitions.
 

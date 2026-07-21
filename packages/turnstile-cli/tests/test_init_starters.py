@@ -122,8 +122,13 @@ class TestReleasePinning:
         assert pin_repo_url(f"{self.DEFAULT}@main") == f"{self.DEFAULT}@main"
 
     def test_pin_repo_url_handles_ssh_at(self):
+        # scp-shorthand SSH is not a uv-installable URL; this only documents
+        # that pinning does not corrupt it (the '@' is in the host, not a ref).
         ssh = "git@github.com:PaperArmada/turnstile.git"
         assert pin_repo_url(ssh) == f"{ssh}@{TURNSTILE_REF}"
+
+    def test_pin_repo_url_strips_trailing_slash(self):
+        assert pin_repo_url(f"{self.DEFAULT}/") == f"{self.DEFAULT}@{TURNSTILE_REF}"
 
     def test_mcp_config_is_pinned(self):
         cfg = _mcp_config_uvx(self.DEFAULT)
