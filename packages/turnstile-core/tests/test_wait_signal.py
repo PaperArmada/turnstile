@@ -1,5 +1,6 @@
 """Tests for wait states and signal delivery."""
 
+import asyncio
 import shutil
 from pathlib import Path
 
@@ -16,6 +17,11 @@ from turnstile_core.models import (
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def _signal(engine, *args, **kwargs):
+    """Call the now-async receive_signal from a synchronous test."""
+    return asyncio.run(engine.receive_signal(*args, **kwargs))
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +171,8 @@ class TestWaitTransition:
 
 class TestSignalDelivery:
     def test_signal_with_target(self, waiting_instance, engine):
-        result = engine.receive_signal(
+        result = _signal(
+            engine,
             waiting_instance, "review_complete",
             {"approved": True, "comments": "Looks good"},
             target_state="approved",
@@ -175,7 +182,8 @@ class TestSignalDelivery:
         assert result["signal_data"]["approved"] is True
 
     def test_signal_without_target(self, waiting_instance, engine):
-        result = engine.receive_signal(
+        result = _signal(
+            engine,
             waiting_instance, "review_complete",
             {"approved": False, "comments": "Needs work"},
         )
@@ -185,21 +193,24 @@ class TestSignalDelivery:
 
     def test_signal_wrong_name(self, waiting_instance, engine):
         with pytest.raises(TransitionError, match="Expected signal"):
-            engine.receive_signal(
+            _signal(
+                engine,
                 waiting_instance, "wrong_signal",
                 {"approved": True, "comments": ""},
             )
 
     def test_signal_missing_fields(self, waiting_instance, engine):
         with pytest.raises(TransitionError, match="missing required fields"):
-            engine.receive_signal(
+            _signal(
+                engine,
                 waiting_instance, "review_complete",
                 {"approved": True},  # missing 'comments'
             )
 
     def test_signal_invalid_target(self, waiting_instance, engine):
         with pytest.raises(TransitionError, match="not a valid transition"):
-            engine.receive_signal(
+            _signal(
+                engine,
                 waiting_instance, "review_complete",
                 {"approved": True, "comments": ""},
                 target_state="nonexistent",
@@ -210,14 +221,16 @@ class TestSignalDelivery:
         iid = result["instance_id"]
 
         with pytest.raises(TransitionError, match="not waiting"):
-            engine.receive_signal(
+            _signal(
+                engine,
                 iid, "review_complete",
                 {"approved": True, "comments": ""},
             )
 
     def test_signal_records_history(self, waiting_instance, engine):
         # Signal to "rejected" (non-terminal) so we can inspect history
-        engine.receive_signal(
+        _signal(
+            engine,
             waiting_instance, "review_complete",
             {"approved": False, "comments": "Needs work"},
             target_state="rejected",
@@ -238,7 +251,8 @@ class TestSignalDelivery:
         loop = asyncio.new_event_loop()
         try:
             # Deliver signal without target
-            engine.receive_signal(
+            _signal(
+                engine,
                 waiting_instance, "review_complete",
                 {"approved": False, "comments": "Needs work"},
             )

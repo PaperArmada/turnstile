@@ -1,0 +1,39 @@
+name: signal-gated
+description: "A wait state whose signal transitions land on gated targets"
+version: "1.0.0"
+
+parameters:
+  - name: task_name
+    description: "Name of the task"
+    required: true
+
+states:
+  - id: start
+    type: initial
+    transitions: [awaiting]
+
+  - id: awaiting
+    type: wait
+    signal:
+      name: reviewed
+      required_fields:
+        - key: approver
+    transitions: [blocked_target, open_target]
+
+  # Signalling to here must be refused: its entry gate fails.
+  - id: blocked_target
+    description: "Signal target whose on_enter gate fails"
+    transitions: [done]
+    on_enter:
+      validate:
+        - command: "echo denied"
+          expect: empty
+          message: "signal target gate must block"
+          severity: error
+
+  - id: open_target
+    description: "Signal target with no gate"
+    transitions: [done]
+
+  - id: done
+    type: terminal

@@ -219,7 +219,7 @@ async def process_signal(
                       Must be in the wait state's transitions list.
     """
     engine = _get_engine()
-    return engine.receive_signal(
+    return await engine.receive_signal(
         instance_id, signal_name, data,
         target_state=target_state, session_id=_session_id,
     )

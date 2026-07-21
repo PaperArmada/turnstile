@@ -59,7 +59,7 @@ from turnstile_core.loader import (
     load_definition,
     load_registry,
 )
-from turnstile_core.models import ProcessDefinition, StateType
+from turnstile_core.models import ProcessDefinition, ProcessState, StateType
 from turnstile_core.persistence import (
     HistoryEntry,
     OverrideEntry,
@@ -380,6 +380,33 @@ class Engine:
             result.append(entry)
         return result
 
+    async def _run_exit_gates(
+        self, state: ProcessState, validation_params: dict[str, str],
+    ) -> tuple[list[ValidationResult], bool]:
+        """Run a state's on_exit validations.
+
+        Returns (results, blocked). Shared by transition and receive_signal so
+        that a signal-driven state change is gated identically to an ordinary
+        one; before this was factored out, the signal path ran no gates at all.
+        """
+        if not (state.on_exit and state.on_exit.validations):
+            return [], False
+        results = await run_validations(
+            state.on_exit.validations, validation_params, self.project_root,
+        )
+        return results, has_blocking_failures(results)
+
+    async def _run_enter_gates(
+        self, state: ProcessState, validation_params: dict[str, str],
+    ) -> tuple[list[ValidationResult], bool]:
+        """Run a state's on_enter validations. See _run_exit_gates."""
+        if not (state.on_enter and state.on_enter.validations):
+            return [], False
+        results = await run_validations(
+            state.on_enter.validations, validation_params, self.project_root,
+        )
+        return results, has_blocking_failures(results)
+
     async def transition(
         self, instance_id: str, target_state: str,
         metadata: dict[str, Any] | None = None,
@@ -467,22 +494,18 @@ class Engine:
         }
 
         # Run on_exit validations for current state
-        if current.on_exit and current.on_exit.validations:
-            exit_results = await run_validations(
-                current.on_exit.validations,
-                validation_params,
-                self.project_root,
+        exit_results, exit_blocked = await self._run_exit_gates(
+            current, validation_params
+        )
+        all_results.extend(exit_results)
+        if exit_blocked:
+            return TransitionResult(
+                success=False,
+                new_state=instance.current_state,
+                validation_results=[_vr_to_dict(r) for r in all_results],
+                available_transitions=current.transitions,
+                message="on_exit validation failed",
             )
-            all_results.extend(exit_results)
-
-            if has_blocking_failures(exit_results):
-                return TransitionResult(
-                    success=False,
-                    new_state=instance.current_state,
-                    validation_results=[_vr_to_dict(r) for r in all_results],
-                    available_transitions=current.transitions,
-                    message="on_exit validation failed",
-                )
 
         # Run on_exit actions for current state
         if current.on_exit and current.on_exit.actions:
@@ -497,22 +520,18 @@ class Engine:
                     pass  # Actions are best-effort
 
         # Run on_enter validations for target state
-        if target.on_enter and target.on_enter.validations:
-            enter_results = await run_validations(
-                target.on_enter.validations,
-                validation_params,
-                self.project_root,
+        enter_results, enter_blocked = await self._run_enter_gates(
+            target, validation_params
+        )
+        all_results.extend(enter_results)
+        if enter_blocked:
+            return TransitionResult(
+                success=False,
+                new_state=instance.current_state,
+                validation_results=[_vr_to_dict(r) for r in all_results],
+                available_transitions=current.transitions,
+                message="on_enter validation failed",
             )
-            all_results.extend(enter_results)
-
-            if has_blocking_failures(enter_results):
-                return TransitionResult(
-                    success=False,
-                    new_state=instance.current_state,
-                    validation_results=[_vr_to_dict(r) for r in all_results],
-                    available_transitions=current.transitions,
-                    message="on_enter validation failed",
-                )
 
         # Transition succeeds
         history_entry = HistoryEntry(**{
@@ -916,7 +935,7 @@ class Engine:
             message=f"Override logged: {reason}",
         )
 
-    def receive_signal(
+    async def receive_signal(
         self, instance_id: str, signal_name: str,
         data: dict[str, Any],
         target_state: str | None = None,
@@ -926,6 +945,14 @@ class Engine:
 
         Validates the signal name and required fields, stores the signal
         data, and optionally transitions to a target state.
+
+        A transition requested here runs the same validation gates as an
+        ordinary transition. If a blocking gate fails, the signal is still
+        recorded (it genuinely arrived, and discarding it would lose an
+        external fact) and the instance stops waiting, but the state change is
+        refused and reported. The instance is left at the wait state with
+        waiting cleared, so it can be advanced by a normal transition once the
+        gate's condition is met, rather than being stranded.
 
         Args:
             instance_id: The ID of the waiting process instance.
@@ -984,6 +1011,48 @@ class Engine:
                 )
 
             target = defn.get_state(target_state)
+
+            # Gate the signal-driven transition exactly as an ordinary one.
+            validation_params = {
+                **instance.parameters,
+                "instance_id": instance.instance_id,
+            }
+            gate_results: list[ValidationResult] = []
+            exit_results, exit_blocked = await self._run_exit_gates(
+                current, validation_params
+            )
+            gate_results.extend(exit_results)
+            blocked_by = "on_exit" if exit_blocked else ""
+            if not exit_blocked and target is not None:
+                enter_results, enter_blocked = await self._run_enter_gates(
+                    target, validation_params
+                )
+                gate_results.extend(enter_results)
+                if enter_blocked:
+                    blocked_by = "on_enter"
+
+            if blocked_by:
+                # Record the signal, refuse the state change.
+                self._store.save(instance)
+                self._store.append_log(
+                    f"SIGNAL {instance.process_name}-{instance.instance_id}: "
+                    f"received '{signal_name}', transition to {target_state} "
+                    f"refused ({blocked_by} validation failed)"
+                )
+                result["success"] = False
+                result["new_state"] = instance.current_state
+                result["available_transitions"] = current.transitions
+                result["validation_results"] = [
+                    _vr_to_dict(r) for r in gate_results
+                ]
+                result["message"] = f"{blocked_by} validation failed"
+                return result
+
+            if gate_results:
+                result["validation_results"] = [
+                    _vr_to_dict(r) for r in gate_results
+                ]
+
             history_entry = HistoryEntry(**{
                 "from": instance.current_state,
                 "to": target_state,
