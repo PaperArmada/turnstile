@@ -17,7 +17,8 @@ settings:
   log_retention_days: 90
   enforcement: monitor
   notifications:
-    on_complete: echo '[COMPLETE] ${name} (${instance_id}) finished at ${state}' >>
-      .process-state/log.txt
-    on_override: 'echo ''[OVERRIDE] ${name} (${instance_id}): ${step} skipped by ${user}
-      - ${reason}'' >> .process-state/log.txt'
+    # ${var} references are expanded by the shell from environment variables
+    # (name, instance_id, state, step, user, reason). Use double quotes so the
+    # shell expands them; single quotes would emit the literal text.
+    on_complete: 'echo "[COMPLETE] ${name} (${instance_id}) finished at ${state}" >> .process-state/log.txt'
+    on_override: 'echo "[OVERRIDE] ${name} (${instance_id}): ${step} skipped by ${user} - ${reason}" >> .process-state/log.txt'

@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import re
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 async def run_notification(
@@ -16,16 +20,21 @@ async def run_notification(
     cwd: Path,
     timeout: int = 30,
 ) -> dict[str, Any]:
-    """Run a notification command with template substitution.
+    """Run a notification command with context supplied via the environment.
 
-    Template variables use {name} syntax. Unknown variables are left as-is.
+    Template variables use ${name} shell syntax and are expanded by the shell
+    from environment variables, not interpolated into the command text. This
+    prevents a context value (some of which, such as the skip reason and the
+    acting user, are caller-supplied) from injecting shell commands. It is the
+    same mechanism used for validation gates; see validator.run_command.
 
     Returns a result dict with success, output, and error info.
     """
-    # Substitute known variables, leave unknown ones as-is
     command = command_template
+    env = os.environ.copy()
     for key, value in context.items():
-        command = command.replace(f"{{{key}}}", value)
+        if _ENV_NAME_RE.match(key):
+            env[key] = value
 
     try:
         proc = await asyncio.create_subprocess_shell(
@@ -33,6 +42,7 @@ async def run_notification(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
+            env=env,
         )
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(), timeout=timeout

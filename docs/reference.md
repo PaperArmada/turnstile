@@ -237,8 +237,11 @@ settings:
   require_override_reason: true
   log_retention_days: 90
   notifications:
-    on_complete: "echo 'Process {name} completed' >> .process-state/log.txt"
-    on_override: "echo 'OVERRIDE: {step} skipped by {user}: {reason}' >> .process-state/log.txt"
+    # ${var} references are expanded by the shell from environment variables:
+    # name, instance_id, state (on_complete); step, user, reason (on_override).
+    # Use double quotes so the shell expands them.
+    on_complete: 'echo "Process ${name} completed" >> .process-state/log.txt'
+    on_override: 'echo "OVERRIDE: ${step} skipped by ${user}: ${reason}" >> .process-state/log.txt'
 ```
 
 Without a registry, turnstile auto-discovers all `.yaml` files in `.processes/`.

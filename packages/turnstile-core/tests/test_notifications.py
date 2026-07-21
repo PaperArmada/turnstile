@@ -22,7 +22,7 @@ class TestRunNotification:
     @pytest.mark.asyncio
     async def test_template_substitution(self, tmp_path):
         result = await run_notification(
-            "echo 'Process {name} done'",
+            'echo "Process ${name} done"',
             {"name": "release"},
             tmp_path,
         )
@@ -32,7 +32,7 @@ class TestRunNotification:
     @pytest.mark.asyncio
     async def test_multiple_variables(self, tmp_path):
         result = await run_notification(
-            "echo '{name} {state}'",
+            'echo "${name} ${state}"',
             {"name": "deploy", "state": "done"},
             tmp_path,
         )
@@ -40,14 +40,31 @@ class TestRunNotification:
         assert "deploy done" in result["stdout"]
 
     @pytest.mark.asyncio
-    async def test_unknown_variable_left_as_is(self, tmp_path):
+    async def test_unknown_variable_expands_empty(self, tmp_path):
+        """An unset ${var} expands to empty, per standard shell behavior."""
         result = await run_notification(
-            "echo '{name} {unknown}'",
+            'echo "[${name}][${unknown}]"',
             {"name": "deploy"},
             tmp_path,
         )
         assert result["success"] is True
-        assert "{unknown}" in result["stdout"]
+        assert result["stdout"] == "[deploy][]"
+
+    @pytest.mark.asyncio
+    async def test_context_value_cannot_inject_commands(self, tmp_path):
+        """A context value with shell metacharacters must not execute.
+
+        The skip reason and acting user are caller-supplied; values are passed
+        via the environment and never interpolated into the command text.
+        """
+        marker = tmp_path / "NOTIFY_PWNED"
+        result = await run_notification(
+            'echo "reason: ${reason}"',
+            {"reason": f'x"; touch {marker}; echo "'},
+            tmp_path,
+        )
+        assert result["success"] is True
+        assert not marker.exists()
 
     @pytest.mark.asyncio
     async def test_failed_command(self, tmp_path):
@@ -76,7 +93,7 @@ class TestRunNotification:
 class TestFireNotification:
     @pytest.mark.asyncio
     async def test_fires_matching_event(self, tmp_path):
-        notifications = {"on_complete": "echo '{name} done'"}
+        notifications = {"on_complete": 'echo "${name} done"'}
         result = await fire_notification(
             "on_complete", notifications, {"name": "release"}, tmp_path
         )
@@ -100,7 +117,7 @@ class TestFireNotification:
     @pytest.mark.asyncio
     async def test_on_override_context(self, tmp_path):
         notifications = {
-            "on_override": "echo 'OVERRIDE: {step} by {user}: {reason}'"
+            "on_override": 'echo "OVERRIDE: ${step} by ${user}: ${reason}"'
         }
         result = await fire_notification(
             "on_override",
@@ -128,8 +145,8 @@ class TestEngineNotificationIntegration:
             f'version: "1.0"\n'
             f"settings:\n"
             f"  notifications:\n"
-            f"    on_complete: \"echo 'completed:{{name}}' >> {log_file}\"\n"
-            f"    on_override: \"echo 'override:{{step}}' >> {log_file}\"\n"
+            f'    on_complete: \'echo "completed:${{name}}" >> {log_file}\'\n'
+            f'    on_override: \'echo "override:${{step}}" >> {log_file}\'\n'
         )
         return Engine(tmp_path), log_file
 

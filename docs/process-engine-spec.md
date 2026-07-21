@@ -155,9 +155,10 @@ settings:
   state_dir: ".process-state"       # where runtime state lives
   log_retention_days: 90            # how long to keep completed process logs
   require_override_reason: true     # force a reason string on skip/override
-  notifications:                    # optional hooks
-    on_complete: "echo 'Process {name} completed' >> .process-state/log.txt"
-    on_override: "echo 'OVERRIDE: {step} skipped by {user}: {reason}' >> .process-state/log.txt"
+  notifications:                    # optional hooks; ${var} expanded by the
+                                    # shell from env vars, use double quotes
+    on_complete: 'echo "Process ${name} completed" >> .process-state/log.txt'
+    on_override: 'echo "OVERRIDE: ${step} skipped by ${user}: ${reason}" >> .process-state/log.txt'
 ```
 
 ### Process Definition Schema
