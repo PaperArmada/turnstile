@@ -6,11 +6,15 @@ parameters:
   - name: task_name
     description: "Name of the task"
     required: true
+  - name: gate_ok
+    description: "Toggles the gated_on_param entry gate (yes passes)"
+    required: false
+    default: "no"
 
 states:
   - id: start
     type: initial
-    transitions: [awaiting]
+    transitions: [awaiting, awaiting_exit_gated]
 
   - id: awaiting
     type: wait
@@ -18,7 +22,23 @@ states:
       name: reviewed
       required_fields:
         - key: approver
-    transitions: [blocked_target, open_target]
+    transitions: [blocked_target, open_target, gated_on_param, blocked_terminal, open_action]
+
+  # A wait state whose own on_exit gate fails: signalling out of it must be
+  # refused by the on_exit branch of the signal path.
+  - id: awaiting_exit_gated
+    type: wait
+    signal:
+      name: reviewed
+      required_fields:
+        - key: approver
+    transitions: [open_target]
+    on_exit:
+      validate:
+        - command: "echo dirty"
+          expect: empty
+          message: "on_exit gate must block signal departure"
+          severity: error
 
   # Signalling to here must be refused: its entry gate fails.
   - id: blocked_target
@@ -34,6 +54,39 @@ states:
   - id: open_target
     description: "Signal target with no gate"
     transitions: [done]
+
+  # Signal target with an on_enter action; the action runs in the project
+  # root and touches a marker so a test can confirm actions run on the
+  # signal path, matching an ordinary transition.
+  - id: open_action
+    description: "Signal target with an on_enter action"
+    transitions: [done]
+    on_enter:
+      actions:
+        - command: "touch SIGNAL_ACTION_RAN"
+
+  # Entry gate passes only when the gate_ok parameter is "yes", so a test can
+  # flip it from failing to passing and re-deliver the same signal.
+  - id: gated_on_param
+    description: "Signal target whose gate depends on a parameter"
+    transitions: [done]
+    on_enter:
+      validate:
+        - command: 'echo "$gate_ok"'
+          expect: 'equals("yes")'
+          message: "gate_ok must be yes"
+          severity: error
+
+  # A terminal target whose on_enter gate fails: signalling to it must be
+  # refused, exercising the gate path for a terminal reached via signal.
+  - id: blocked_terminal
+    type: terminal
+    on_enter:
+      validate:
+        - command: "echo nope"
+          expect: empty
+          message: "terminal entry gate must block"
+          severity: error
 
   - id: done
     type: terminal

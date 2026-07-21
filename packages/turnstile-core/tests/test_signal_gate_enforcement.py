@@ -83,23 +83,62 @@ class TestSignalTransitionIsGated:
         assert failed, "the blocking gate must appear in validation_results"
 
     @pytest.mark.asyncio
-    async def test_signal_is_recorded_even_when_transition_refused(
+    async def test_refused_signal_is_a_no_op_and_stays_waiting(
         self, engine: Engine, project: Path
     ):
-        """The signal genuinely arrived; discarding it would lose a fact.
+        """A blocked signal transition leaves the instance untouched.
 
-        The instance stops waiting so it is not stranded, but the state does
-        not advance past the failing gate.
+        Mirroring a blocked ordinary transition, the wait is NOT cleared and
+        no state is written, so the same signal can be re-delivered once the
+        gate condition is met (see the recovery test below).
         """
         iid = await _arrive_at_wait(engine)
 
-        await engine.receive_signal(
+        result = await engine.receive_signal(
             iid, "reviewed", {"approver": "me"}, target_state="blocked_target"
         )
+        assert result["still_waiting"] is True
 
         instance = StateStore(project / ".process-state").load(iid)
-        assert instance.waiting is False
-        assert instance.signal_data == {"approver": "me"}
+        assert instance.waiting is True
+        assert instance.current_state == "awaiting"
+
+    @pytest.mark.asyncio
+    async def test_signal_can_be_redelivered_after_gate_passes(
+        self, engine: Engine, project: Path
+    ):
+        """The central recovery claim: refuse, fix the gate, re-deliver.
+
+        The gate on gated_on_param reads an env-passed parameter so the test
+        can flip it from failing to passing between the two deliveries, then
+        assert the re-delivered signal transitions AND carries attribution.
+        """
+        iid = engine.start("signal-gated", {"task_name": "t", "gate_ok": "no"})[
+            "instance_id"
+        ]
+        await engine.transition(iid, "awaiting")
+
+        refused = await engine.receive_signal(
+            iid, "reviewed", {"approver": "alice"}, target_state="gated_on_param"
+        )
+        assert refused["success"] is False
+
+        # Fix the condition the gate checks, then re-deliver the same signal.
+        inst = engine._store.load(iid)
+        inst.parameters["gate_ok"] = "yes"
+        engine._store.save(inst)
+
+        ok = await engine.receive_signal(
+            iid, "reviewed", {"approver": "alice"}, target_state="gated_on_param"
+        )
+        assert ok["success"] is True
+        assert ok["new_state"] == "gated_on_param"
+
+        # Attribution survives on the transition that actually advanced.
+        instance = engine._store.load(iid)
+        last = instance.history[-1]
+        assert last.triggered_by == "signal: reviewed"
+        assert last.metadata["signal_data"] == {"approver": "alice"}
 
     @pytest.mark.asyncio
     async def test_passing_gate_allows_signal_transition(
@@ -114,6 +153,57 @@ class TestSignalTransitionIsGated:
         assert result["success"] is True
         assert result["new_state"] == "open_target"
         assert _persisted_state(project, iid) == "open_target"
+
+
+class TestSignalGatePathCoverage:
+    @pytest.mark.asyncio
+    async def test_failing_on_exit_gate_refuses_signal_transition(
+        self, engine: Engine, project: Path
+    ):
+        """The on_exit branch of the signal path blocks departure."""
+        iid = engine.start("signal-gated", {"task_name": "t"})["instance_id"]
+        await engine.transition(iid, "awaiting_exit_gated")
+
+        result = await engine.receive_signal(
+            iid, "reviewed", {"approver": "me"}, target_state="open_target"
+        )
+
+        assert result["success"] is False
+        assert result["message"] == "on_exit validation failed"
+        assert _persisted_state(project, iid) == "awaiting_exit_gated"
+
+    @pytest.mark.asyncio
+    async def test_gated_terminal_target_is_refused(
+        self, engine: Engine, project: Path
+    ):
+        """A terminal reached via signal is gated like any other target."""
+        iid = await _arrive_at_wait(engine)
+
+        result = await engine.receive_signal(
+            iid, "reviewed", {"approver": "me"}, target_state="blocked_terminal"
+        )
+
+        assert result["success"] is False
+        assert _persisted_state(project, iid) == "awaiting"
+
+
+class TestSignalRunsActions:
+    @pytest.mark.asyncio
+    async def test_signal_transition_runs_on_enter_actions(
+        self, engine: Engine, project: Path
+    ):
+        """Parity with transition: a signal-driven entry runs on_enter actions.
+
+        open_action's on_enter action touches a marker file; reaching it via
+        signal must run it, just as an ordinary transition would.
+        """
+        iid = await _arrive_at_wait(engine)
+
+        await engine.receive_signal(
+            iid, "reviewed", {"approver": "me"}, target_state="open_action"
+        )
+
+        assert (project / "SIGNAL_ACTION_RAN").exists()
 
 
 class TestSignalWithoutTargetIsUnaffected:

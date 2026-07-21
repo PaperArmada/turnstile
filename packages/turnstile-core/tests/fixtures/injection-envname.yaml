@@ -1,0 +1,35 @@
+name: injection-envname
+description: "Gate reads an environment variable, for name-injection testing"
+version: "1.0.0"
+
+parameters:
+  - name: v
+    description: "The only declared parameter"
+    required: true
+
+states:
+  - id: start
+    type: initial
+    transitions: [probe, echo_declared]
+
+  # Echoes PATH so a test can check whether an undeclared PATH parameter
+  # clobbered the gate shell's environment.
+  - id: probe
+    transitions: [done]
+    on_enter:
+      validate:
+        - command: 'echo "$PATH $LD_PRELOAD $LD_LIBRARY_PATH $IFS $BASH_ENV"'
+          expect: not_empty
+          message: "probe env"
+
+  # Echoes the one declared parameter to confirm the allowlist still passes it.
+  - id: echo_declared
+    transitions: [done]
+    on_enter:
+      validate:
+        - command: 'echo "${v}"'
+          expect: not_empty
+          message: "declared value"
+
+  - id: done
+    type: terminal

@@ -117,15 +117,70 @@ class TestRunCommandEnvironment:
         assert code == 0
 
     @pytest.mark.asyncio
-    async def test_non_identifier_names_are_not_exported(self, tmp_path):
-        """An unexportable name leaves its placeholder unexpanded, not filled in."""
+    async def test_non_identifier_name_value_is_not_injected(self, tmp_path):
+        """A name that cannot be exported never injects its value.
+
+        The security property is that the value does not reach the shell. Note
+        the placeholder is not left literal: in POSIX sh `${bad-name}` is a
+        use-default expansion (`bad` is unset, so it yields `name`). What must
+        NOT appear is the value.
+        """
         out, _ = await run_command(
-            'echo "${bad-name}"', tmp_path, parameters={"bad-name": "value"}
+            'echo "${bad-name}"', tmp_path, parameters={"bad-name": "SENTINEL"}
         )
-        assert "value" not in out
+        assert "SENTINEL" not in out
 
     @pytest.mark.asyncio
     async def test_ambient_environment_is_preserved(self, tmp_path):
         """Gates rely on PATH and friends; the env must be extended, not replaced."""
         out, _ = await run_command("echo $PATH", tmp_path, parameters={"x": "1"})
         assert out.strip() != ""
+
+
+class TestUndeclaredParameterNamesAreNotExported:
+    """Regression for the name-based environment injection vector.
+
+    The value fix (env passing) closed value injection but opened a name
+    channel: a caller could pass an undeclared parameter named PATH,
+    LD_PRELOAD, IFS, etc. and clobber the gate shell's environment, corrupting
+    gate results or achieving code execution. The engine restricts the exported
+    environment to names DECLARED by the definition (see Engine._gate_params),
+    so these are dropped before the gate runs.
+    """
+
+    @pytest.fixture()
+    def project(self, tmp_path) -> Path:
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir()
+        shutil.copy(FIXTURES / "injection-envname.yaml", proc_dir / "envname.yaml")
+        return tmp_path
+
+    @pytest.mark.parametrize(
+        "evil_name", ["PATH", "LD_PRELOAD", "LD_LIBRARY_PATH", "IFS", "BASH_ENV"]
+    )
+    @pytest.mark.asyncio
+    async def test_undeclared_env_significant_name_does_not_reach_gate(
+        self, project: Path, evil_name: str
+    ):
+        engine = Engine(project)
+        iid = engine.start(
+            "injection-envname", {"v": "ok", evil_name: "/attacker/injected"}
+        )["instance_id"]
+
+        result = await engine.transition(iid, "probe")
+
+        # The gate echoes the env var; the attacker value must not appear.
+        output = result.validation_results[0]["output"]
+        assert "/attacker/injected" not in output
+
+    @pytest.mark.asyncio
+    async def test_declared_parameter_still_reaches_the_gate(self, project: Path):
+        """The allowlist must not break the legitimate declared-parameter path."""
+        engine = Engine(project)
+        iid = engine.start("injection-envname", {"v": "declared-value"})[
+            "instance_id"
+        ]
+
+        result = await engine.transition(iid, "echo_declared")
+
+        assert result.validation_results[0]["output"] == "declared-value"

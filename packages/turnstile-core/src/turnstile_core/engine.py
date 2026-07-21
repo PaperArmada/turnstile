@@ -380,6 +380,30 @@ class Engine:
             result.append(entry)
         return result
 
+    def _gate_params(
+        self, instance: ProcessInstance, defn: ProcessDefinition,
+    ) -> dict[str, str]:
+        """Build the parameter set exposed to gate and action shells.
+
+        Restricted to parameter names DECLARED by the definition, plus the
+        engine-internal instance_id. Gate and action commands run in a shell
+        with these exported as environment variables (see
+        validator.run_command). Values are safe by construction because they
+        are never interpolated into the command text; this method closes the
+        matching name channel, so a caller cannot smuggle an undeclared,
+        environment-significant name (PATH, LD_PRELOAD, IFS, BASH_ENV, ...)
+        into the gate shell by passing it as an extra parameter. The name
+        boundary is the set of names the definition author declared.
+        """
+        declared = {p.name for p in defn.parameters}
+        params = {
+            key: value
+            for key, value in instance.parameters.items()
+            if key in declared
+        }
+        params["instance_id"] = instance.instance_id
+        return params
+
     async def _run_exit_gates(
         self, state: ProcessState, validation_params: dict[str, str],
     ) -> tuple[list[ValidationResult], bool]:
@@ -406,6 +430,40 @@ class Engine:
             state.on_enter.validations, validation_params, self.project_root,
         )
         return results, has_blocking_failures(results)
+
+    async def _run_exit_actions(
+        self, state: ProcessState, validation_params: dict[str, str],
+    ) -> None:
+        """Run a state's on_exit actions (best-effort side effects).
+
+        Shared by transition and receive_signal so a signal-driven state
+        change runs the same actions as an ordinary one.
+        """
+        if not (state.on_exit and state.on_exit.actions):
+            return
+        for action in state.on_exit.actions:
+            try:
+                await run_command(
+                    action.command, self.project_root, timeout=60,
+                    parameters=validation_params,
+                )
+            except Exception:
+                pass  # Actions are best-effort
+
+    async def _run_enter_actions(
+        self, state: ProcessState, validation_params: dict[str, str],
+    ) -> None:
+        """Run a state's on_enter actions. See _run_exit_actions."""
+        if not (state.on_enter and state.on_enter.actions):
+            return
+        for action in state.on_enter.actions:
+            try:
+                await run_command(
+                    action.command, self.project_root, timeout=60,
+                    parameters=validation_params,
+                )
+            except Exception:
+                pass  # Actions are best-effort
 
     async def transition(
         self, instance_id: str, target_state: str,
@@ -487,11 +545,10 @@ class Engine:
 
         all_results: list[ValidationResult] = []
 
-        # Build validation context: declared params + instance metadata
-        validation_params = {
-            **instance.parameters,
-            "instance_id": instance.instance_id,
-        }
+        # Build validation context: declared params + instance metadata.
+        # Restricted to declared names so a caller cannot inject
+        # environment-significant names into the gate shell (see _gate_params).
+        validation_params = self._gate_params(instance, defn)
 
         # Run on_exit validations for current state
         exit_results, exit_blocked = await self._run_exit_gates(
@@ -508,16 +565,7 @@ class Engine:
             )
 
         # Run on_exit actions for current state
-        if current.on_exit and current.on_exit.actions:
-            for action in current.on_exit.actions:
-                cmd = action.command
-                try:
-                    await run_command(
-                        cmd, self.project_root, timeout=60,
-                        parameters=validation_params,
-                    )
-                except Exception:
-                    pass  # Actions are best-effort
+        await self._run_exit_actions(current, validation_params)
 
         # Run on_enter validations for target state
         enter_results, enter_blocked = await self._run_enter_gates(
@@ -547,16 +595,7 @@ class Engine:
         instance.history.append(history_entry)
 
         # Run on_enter actions
-        if target.on_enter and target.on_enter.actions:
-            for action in target.on_enter.actions:
-                cmd = action.command
-                try:
-                    await run_command(
-                        cmd, self.project_root, timeout=60,
-                        parameters=validation_params,
-                    )
-                except Exception:
-                    pass  # Actions are best-effort
+        await self._run_enter_actions(target, validation_params)
 
         # Handle dispatch states (async subprocess: create child, don't suspend)
         if target.type == StateType.dispatch:
@@ -991,10 +1030,6 @@ class Engine:
                 f"Signal missing required fields: {', '.join(missing)}"
             )
 
-        # Store signal data and clear waiting flag
-        instance.signal_data = data
-        instance.waiting = False
-
         result: dict[str, Any] = {
             "success": True,
             "signal_received": signal_name,
@@ -1013,10 +1048,12 @@ class Engine:
             target = defn.get_state(target_state)
 
             # Gate the signal-driven transition exactly as an ordinary one.
-            validation_params = {
-                **instance.parameters,
-                "instance_id": instance.instance_id,
-            }
+            # Run gates BEFORE mutating the instance so a blocked signal is a
+            # true no-op: the wait is not cleared and no state is written, so
+            # the same signal can be re-delivered (re-running the gates) once
+            # the gate condition is met, and the eventual successful transition
+            # still carries the signal name and its data as attribution.
+            validation_params = self._gate_params(instance, defn)
             gate_results: list[ValidationResult] = []
             exit_results, exit_blocked = await self._run_exit_gates(
                 current, validation_params
@@ -1032,21 +1069,27 @@ class Engine:
                     blocked_by = "on_enter"
 
             if blocked_by:
-                # Record the signal, refuse the state change.
-                self._store.save(instance)
+                # Refuse the state change and leave the instance untouched
+                # (still waiting), mirroring a blocked ordinary transition.
                 self._store.append_log(
                     f"SIGNAL {instance.process_name}-{instance.instance_id}: "
                     f"received '{signal_name}', transition to {target_state} "
-                    f"refused ({blocked_by} validation failed)"
+                    f"refused ({blocked_by} validation failed); still waiting"
                 )
                 result["success"] = False
                 result["new_state"] = instance.current_state
-                result["available_transitions"] = current.transitions
+                result["available_transitions"] = []
+                result["still_waiting"] = True
                 result["validation_results"] = [
                     _vr_to_dict(r) for r in gate_results
                 ]
                 result["message"] = f"{blocked_by} validation failed"
                 return result
+
+            # Gates passed: now commit the signal and clear the wait.
+            instance.signal_data = data
+            instance.waiting = False
+            await self._run_exit_actions(current, validation_params)
 
             if gate_results:
                 result["validation_results"] = [
@@ -1065,6 +1108,10 @@ class Engine:
 
             instance.current_state = target_state
             instance.history.append(history_entry)
+
+            # Run on_enter actions for the target, matching transition().
+            if target is not None:
+                await self._run_enter_actions(target, validation_params)
 
             # Handle dispatch states reached via signal
             if target and target.type == StateType.dispatch:
@@ -1126,7 +1173,11 @@ class Engine:
                 result["available_transitions"] = target.transitions if target else []
                 result["role"] = target.role if target else ""
         else:
-            # Signal received but no transition yet; unlock transitions
+            # Signal received but no transition yet; record it and unlock
+            # transitions. There is no target state, so there are no gates to
+            # run and nothing to refuse.
+            instance.signal_data = data
+            instance.waiting = False
             self._store.save(instance)
 
             self._store.append_log(
