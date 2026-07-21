@@ -211,6 +211,13 @@ async def process_signal(
     delivers the signal, validates required fields, and optionally
     transitions the instance to a target state in one step.
 
+    When a target_state is given, its entry gates (and the wait state's
+    exit gates) run just as they would for an ordinary transition. If a
+    blocking gate fails, the response has success=false and still_waiting=true:
+    the instance stays in the wait state and the signal is not consumed, so
+    once the gate's condition is met the same signal can be delivered again to
+    complete the transition.
+
     Args:
         instance_id: The ID of the waiting process instance.
         signal_name: Must match the wait state's expected signal name.
