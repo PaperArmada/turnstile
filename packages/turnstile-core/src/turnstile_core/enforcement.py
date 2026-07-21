@@ -17,7 +17,11 @@ from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
 
-from turnstile_core.loader import load_registry, discover_definitions_full
+from turnstile_core.loader import (
+    RegistryConfig,
+    discover_definitions_full,
+    load_registry,
+)
 from turnstile_core.models import ProcessDefinition, StatePermissions
 from turnstile_core.persistence import ProcessInstance, StateStore
 
@@ -344,10 +348,51 @@ def check_enforcement(
     if mode == "off":
         return EnforcementResult(decision="allow", reason="Enforcement is off")
 
-    # Load active instances
+    try:
+        return _evaluate_active_enforcement(
+            registry, mode, project_root, action, file_path
+        )
+    except Exception as exc:
+        # Defense in depth: once enforcement is known to be on, any
+        # unanticipated failure to evaluate it fails closed, never open. The
+        # guard's outer handler would otherwise turn a raise into an allow —
+        # the fail-open class F5 exists to prevent (SECURITY-NOTES F5).
+        return _unknown_state_result(
+            mode,
+            f"Enforcement evaluation failed; state is unknown ({exc})",
+            "Enforcement could not be evaluated. Inspect .processes/ and "
+            ".process-state/, then retry.",
+        )
+
+
+def _evaluate_active_enforcement(
+    registry: RegistryConfig,
+    mode: str,
+    project_root: Path,
+    action: str,
+    file_path: str,
+) -> EnforcementResult:
+    """Evaluate enforcement when the mode is on (monitor or enforce).
+
+    Extracted so check_enforcement can wrap it in a fail-closed backstop: an
+    unhandled exception here must never reach the guard's fail-open catch.
+    """
+    # Load active instances. Constructing the store touches the filesystem
+    # (_ensure_dirs), so a .process-state path that exists as a non-directory
+    # raises here; treat any failure to read state as unknown enforcement state
+    # rather than letting it reach the guard's fail-open catch (SECURITY-NOTES F5).
     state_dir = project_root / registry.settings.state_dir
-    store = StateStore(state_dir)
-    active, corrupt = store.list_active_with_errors()
+    try:
+        store = StateStore(state_dir)
+        active, corrupt = store.list_active_with_errors()
+    except Exception as exc:
+        return _unknown_state_result(
+            mode,
+            f"Cannot read process state under {state_dir}; enforcement "
+            f"state is unknown ({exc})",
+            "The .process-state directory is unreadable or is not a "
+            "directory. Fix it, then retry.",
+        )
 
     # A corrupt/unreadable state file means enforcement state is unknown.
     # Never treat that as "no restrictions" — that is the fail-open chain

@@ -1058,20 +1058,70 @@ class TestFailClosedOnUnknownConfig:
         result = check_enforcement(tmp_path, action="edit")
         assert result.decision == "warn"
 
+    def _autodiscover_project(self, tmp_path, mode):
+        """Registry with NO `local:` so discovery scans the directory.
+
+        With auto-discovery, deleting a definition after starting an instance
+        leaves discovery succeeding while the instance's definition is simply
+        absent — which exercises the `unresolved` branch, not the discover-raise
+        branch a registry-listed deletion would hit.
+        """
+        proc_dir = tmp_path / ".processes"
+        proc_dir.mkdir(exist_ok=True)
+        shutil.copy(FIXTURES / "simple.yaml", proc_dir / "simple.yaml")
+        (proc_dir / "registry.yaml").write_text(
+            yaml.dump(
+                {"version": "1.0", "settings": {"enforcement": mode}},
+                default_flow_style=False,
+            )
+        )
+        return proc_dir
+
     def test_unresolved_definition_for_active_instance_denies(self, tmp_path):
         """A live instance whose definition vanished must not default permissive."""
-        proc_dir = self._project(tmp_path, "enforce")
+        proc_dir = self._autodiscover_project(tmp_path, "enforce")
         Engine(tmp_path).start("simple", {"task_name": "x"})
         (proc_dir / "simple.yaml").unlink()
         result = check_enforcement(tmp_path, action="edit")
         assert result.decision == "deny"
-        assert "resolve" in result.reason.lower()
+        # Assert on the branch's own message, not a tmp-path-derived substring.
+        assert "Cannot resolve definition" in result.reason
+        assert "simple" in result.reason
 
     def test_unresolved_definition_for_active_instance_warns_in_monitor(
         self, tmp_path
     ):
-        proc_dir = self._project(tmp_path, "monitor")
+        proc_dir = self._autodiscover_project(tmp_path, "monitor")
         Engine(tmp_path).start("simple", {"task_name": "x"})
         (proc_dir / "simple.yaml").unlink()
         result = check_enforcement(tmp_path, action="edit")
         assert result.decision == "warn"
+        assert "Cannot resolve definition" in result.reason
+
+    def test_state_dir_as_non_directory_denies(self, tmp_path):
+        """.process-state existing as a file must not fail open (F5)."""
+        self._project(tmp_path, "enforce")
+        (tmp_path / ".process-state").write_text("not a directory")
+        result = check_enforcement(tmp_path, action="edit")
+        assert result.decision == "deny"
+        assert "state" in result.reason.lower()
+
+    def test_unexpected_evaluation_error_fails_closed(self, tmp_path, monkeypatch):
+        """Backstop: any unanticipated raise during evaluation denies, not allows.
+
+        Guards against a future unwrapped raise site reintroducing the
+        fail-open chain — once enforcement is known on, evaluation failure is
+        fail-closed regardless of which line raised.
+        """
+        import turnstile_core.enforcement as enf
+
+        self._project(tmp_path, "enforce")
+        Engine(tmp_path).start("simple", {"task_name": "x"})
+
+        def boom(*_a, **_k):
+            raise RuntimeError("unexpected")
+
+        monkeypatch.setattr(enf, "_build_context", boom)
+        result = check_enforcement(tmp_path, action="edit")
+        assert result.decision == "deny"
+        assert "unknown" in result.reason.lower()
