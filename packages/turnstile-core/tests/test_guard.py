@@ -1104,7 +1104,7 @@ class TestFailClosedOnUnknownConfig:
         (tmp_path / ".process-state").write_text("not a directory")
         result = check_enforcement(tmp_path, action="edit")
         assert result.decision == "deny"
-        assert "state" in result.reason.lower()
+        assert "enforcement state is unknown" in result.reason.lower()
 
     def test_unexpected_evaluation_error_fails_closed(self, tmp_path, monkeypatch):
         """Backstop: any unanticipated raise during evaluation denies, not allows.
