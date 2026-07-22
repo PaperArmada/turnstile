@@ -27,6 +27,7 @@ uv.lock
 # are resolved and the docs are scrubbed for publication.
 docs/SECURITY-NOTES.md
 docs/execution-plan.md
+docs/post-flip-issues.md
 
 # IDE
 .vscode/
