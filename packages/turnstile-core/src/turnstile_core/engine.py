@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 _UNRESOLVED_TEMPLATE_RE = re.compile(r"\$\{([^}]+)\}")
 
@@ -284,6 +287,63 @@ class Engine:
 
         return result
 
+    def _emit(
+        self,
+        event_type: str,
+        instance: ProcessInstance,
+        payload: dict[str, Any] | None = None,
+        session_id: str = "",
+        actor: str = "",
+    ) -> None:
+        """Append a typed event to the shadow stream (events.jsonl).
+
+        Called immediately before the persist that lands the mutation, so
+        the incremented per-instance sequence number is saved with the
+        instance. Instance JSON stays the source of truth; the stream is
+        validated shape for the future event-sourced substrate. Emission
+        never blocks the operation: a failed append is logged and swallowed
+        (fail open), because the shadow stream must not break live work.
+        """
+        event = {
+            "event_type": event_type,
+            "instance_id": instance.instance_id,
+            "process_name": instance.process_name,
+            "seq": instance.event_seq,
+            "at": _now_iso(),
+            "session_id": session_id,
+            "actor": actor,
+            "payload": payload or {},
+        }
+        try:
+            self._store.append_event(event)
+        except Exception:
+            logger.warning(
+                "Failed to append event %s for %s-%s to events.jsonl",
+                event_type,
+                instance.process_name,
+                instance.instance_id,
+            )
+        else:
+            # Increment only on a successful append so the stream stays
+            # gapless: a swallowed failure reuses the number instead of
+            # leaving a hole indistinguishable from an ordering bug.
+            instance.event_seq += 1
+
+    @staticmethod
+    def _entry_payload(entry: HistoryEntry) -> dict[str, Any]:
+        """History-entry data carried on transition-shaped events.
+
+        Contains everything fold(events) needs to rebuild the entry.
+        """
+        return {
+            "from": entry.from_state,
+            "to": entry.to_state,
+            "role": entry.role,
+            "triggered_by": entry.triggered_by,
+            "validations": entry.validations,
+            "metadata": entry.metadata,
+        }
+
     def start(
         self,
         name: str,
@@ -310,6 +370,18 @@ class Engine:
             definition_hash=def_hash,
             parameters=params,
         )
+        self._emit(
+            "started",
+            instance,
+            {
+                "initial_state": initial.id,
+                "parameters": params,
+                "process_version": defn.version,
+                "definition_hash": def_hash,
+                "started_by": instance.started_by,
+            },
+        )
+        self._store.save(instance)
 
         return {
             "instance_id": instance.instance_id,
@@ -627,6 +699,22 @@ class Engine:
             })
             instance.current_state = target.immediate
             instance.history.append(auto_entry)
+            self._emit(
+                "transition",
+                instance,
+                self._entry_payload(history_entry),
+                session_id=session_id,
+            )
+            self._emit(
+                "dispatch",
+                instance,
+                {
+                    **self._entry_payload(auto_entry),
+                    "child_instance_id": child_result["instance_id"],
+                    "child_process": child_result["process_name"],
+                },
+                session_id=session_id,
+            )
             self._store.save(instance)
 
             self._store.append_log(
@@ -654,6 +742,16 @@ class Engine:
         # Handle wait states
         if target.type == StateType.wait:
             instance.waiting = True
+            self._emit(
+                "transition",
+                instance,
+                {
+                    **self._entry_payload(history_entry),
+                    "waiting": True,
+                    "signal": target.signal.name,
+                },
+                session_id=session_id,
+            )
             self._store.save(instance)
 
             self._store.append_log(
@@ -675,6 +773,22 @@ class Engine:
         # Handle subprocess states
         if target.type == StateType.subprocess:
             child_result = self._start_subprocess(instance, target)
+            self._emit(
+                "transition",
+                instance,
+                self._entry_payload(history_entry),
+                session_id=session_id,
+            )
+            self._emit(
+                "subprocess_started",
+                instance,
+                {
+                    "child_instance_id": child_result["instance_id"],
+                    "child_process": child_result["process_name"],
+                    "suspended": True,
+                },
+                session_id=session_id,
+            )
             self._store.save(instance)
 
             self._store.append_log(
@@ -694,6 +808,18 @@ class Engine:
 
         # Handle terminal states
         if target.type == StateType.terminal:
+            self._emit(
+                "transition",
+                instance,
+                self._entry_payload(history_entry),
+                session_id=session_id,
+            )
+            self._emit(
+                "complete",
+                instance,
+                {"final_state": target_state},
+                session_id=session_id,
+            )
             self._store.complete(instance)
             # Check if this child completing should resume a parent
             parent_info = self._resume_parent(
@@ -706,6 +832,12 @@ class Engine:
                 "state": target_state,
             })
         else:
+            self._emit(
+                "transition",
+                instance,
+                self._entry_payload(history_entry),
+                session_id=session_id,
+            )
             self._store.save(instance)
             parent_info = None
 
@@ -778,6 +910,18 @@ class Engine:
         # Link parent and child
         child_instance.parent_instance_id = parent.instance_id
         child_instance.parent_state_id = state.id
+        self._emit(
+            "started",
+            child_instance,
+            {
+                "initial_state": initial.id,
+                "parameters": child_params,
+                "process_version": child_defn.version,
+                "definition_hash": child_hash,
+                "parent_instance_id": parent.instance_id,
+                "parent_state_id": state.id,
+            },
+        )
         self._store.save(child_instance)
 
         parent.child_instance_id = child_instance.instance_id
@@ -842,6 +986,19 @@ class Engine:
         child_instance.parent_state_id = state.id
         if state.assign_to:
             child_instance.started_by = state.assign_to
+        self._emit(
+            "started",
+            child_instance,
+            {
+                "initial_state": initial.id,
+                "parameters": child_params,
+                "process_version": child_defn.version,
+                "definition_hash": child_hash,
+                "parent_instance_id": parent.instance_id,
+                "parent_state_id": state.id,
+                "assigned_to": state.assign_to or "",
+            },
+        )
         self._store.save(child_instance)
 
         self._store.append_log(
@@ -895,6 +1052,18 @@ class Engine:
 
         parent.suspended = False
         parent.child_instance_id = None
+        # "parent_resumed" extends the issue's event list: resuming a
+        # suspended parent is a mutation not expressible by any other event.
+        self._emit(
+            "parent_resumed",
+            parent,
+            {
+                "child_instance_id": child.instance_id,
+                "child_process": child.process_name,
+                "outcome": outcome,
+                "available_transitions": available,
+            },
+        )
         self._store.save(parent)
 
         self._store.append_log(
@@ -947,7 +1116,19 @@ class Engine:
         instance.history.append(history_entry)
         instance.overrides.append(override)
 
+        self._emit(
+            "skip",
+            instance,
+            {**self._entry_payload(history_entry), "reason": reason},
+            session_id=session_id,
+        )
         if target.type == StateType.terminal:
+            self._emit(
+                "complete",
+                instance,
+                {"final_state": target_state, "via": "skip"},
+                session_id=session_id,
+            )
             self._store.complete(instance)
         else:
             self._store.save(instance)
@@ -1142,6 +1323,26 @@ class Engine:
                 })
                 instance.current_state = target.immediate
                 instance.history.append(auto_entry)
+                self._emit(
+                    "signal_received",
+                    instance,
+                    {
+                        **self._entry_payload(history_entry),
+                        "signal": signal_name,
+                        "data": data,
+                    },
+                    session_id=session_id,
+                )
+                self._emit(
+                    "dispatch",
+                    instance,
+                    {
+                        **self._entry_payload(auto_entry),
+                        "child_instance_id": child_result["instance_id"],
+                        "child_process": child_result["process_name"],
+                    },
+                    session_id=session_id,
+                )
                 self._store.save(instance)
 
                 self._store.append_log(
@@ -1155,6 +1356,22 @@ class Engine:
                 result["role"] = immediate_state.role if immediate_state else ""
                 result["subprocess_started"] = child_result["instance_id"]
             elif target and target.type == StateType.terminal:
+                self._emit(
+                    "signal_received",
+                    instance,
+                    {
+                        **self._entry_payload(history_entry),
+                        "signal": signal_name,
+                        "data": data,
+                    },
+                    session_id=session_id,
+                )
+                self._emit(
+                    "complete",
+                    instance,
+                    {"final_state": target_state, "via": "signal"},
+                    session_id=session_id,
+                )
                 self._store.complete(instance)
 
                 self._store.append_log(
@@ -1166,6 +1383,16 @@ class Engine:
                 result["available_transitions"] = []
                 result["role"] = target.role if target else ""
             else:
+                self._emit(
+                    "signal_received",
+                    instance,
+                    {
+                        **self._entry_payload(history_entry),
+                        "signal": signal_name,
+                        "data": data,
+                    },
+                    session_id=session_id,
+                )
                 self._store.save(instance)
 
                 self._store.append_log(
@@ -1182,6 +1409,16 @@ class Engine:
             # run and nothing to refuse.
             instance.signal_data = data
             instance.waiting = False
+            self._emit(
+                "signal_received",
+                instance,
+                {
+                    "signal": signal_name,
+                    "data": data,
+                    "awaiting_transition": True,
+                },
+                session_id=session_id,
+            )
             self._store.save(instance)
 
             self._store.append_log(
@@ -1194,10 +1431,18 @@ class Engine:
 
         return result
 
-    def abandon(self, instance_id: str, reason: str) -> dict[str, Any]:
+    def abandon(
+        self, instance_id: str, reason: str, session_id: str = ""
+    ) -> dict[str, Any]:
         """Abandon a process instance."""
         instance = self._store.load(instance_id)
         final_state = instance.current_state
+        self._emit(
+            "abandon",
+            instance,
+            {"final_state": final_state, "reason": reason},
+            session_id=session_id,
+        )
         self._store.abandon(instance, reason)
 
         result: dict[str, Any] = {
@@ -1215,7 +1460,9 @@ class Engine:
 
         return result
 
-    def undo(self, instance_id: str, reason: str) -> TransitionResult:
+    def undo(
+        self, instance_id: str, reason: str, session_id: str = ""
+    ) -> TransitionResult:
         """Revert the last transition (administrative correction).
 
         Cannot undo past a skip or another undo.
@@ -1241,6 +1488,16 @@ class Engine:
 
         instance.current_state = previous_state
         instance.history.pop()
+        self._emit(
+            "undo",
+            instance,
+            {
+                "undone_to_state": last.to_state,
+                "restored_state": previous_state,
+                "reason": reason,
+            },
+            session_id=session_id,
+        )
         self._store.save(instance)
 
         self._store.append_log(
@@ -1262,6 +1519,16 @@ class Engine:
         instance = self._store.load(instance_id)
         previous_owner = instance.started_by
         instance.started_by = to_user
+        self._emit(
+            "handoff",
+            instance,
+            {
+                "from_user": previous_owner,
+                "to_user": to_user,
+                "reason": reason,
+            },
+            actor=to_user,
+        )
         self._store.save(instance)
 
         self._store.append_log(

@@ -245,7 +245,7 @@ async def process_abandon(
         reason: Why the process is being abandoned.
     """
     engine = _get_engine()
-    return engine.abandon(instance_id, reason)
+    return engine.abandon(instance_id, reason, session_id=_session_id)
 
 
 @mcp.tool()
@@ -262,7 +262,7 @@ async def process_undo(
         reason: Why this undo is necessary.
     """
     engine = _get_engine()
-    result = engine.undo(instance_id, reason)
+    result = engine.undo(instance_id, reason, session_id=_session_id)
     return {
         "success": result.success,
         "new_state": result.new_state,

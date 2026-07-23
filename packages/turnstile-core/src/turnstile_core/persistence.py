@@ -74,6 +74,11 @@ class ProcessInstance(BaseModel):
     waiting: bool = False
     signal_data: dict[str, Any] | None = None
 
+    # Next sequence number for the instance's event stream (events.jsonl).
+    # Persisted with the instance so the shadow stream stays ordered across
+    # sessions; defaults to 0 for state files that predate the stream.
+    event_seq: int = 0
+
     model_config = {"populate_by_name": True}
 
 
@@ -147,6 +152,7 @@ class StateStore:
         self.completed_dir = state_dir / "completed"
         self.abandoned_dir = state_dir / "abandoned"
         self.log_path = state_dir / "log.txt"
+        self.events_path = state_dir / "events.jsonl"
         self._ensure_dirs()
 
     def _ensure_dirs(self) -> None:
@@ -332,6 +338,19 @@ class StateStore:
         timestamp = _now_iso()
         with open(self.log_path, "a") as f:
             f.write(f"[{timestamp}] {event}\n")
+
+    def append_event(self, event: dict[str, Any]) -> None:
+        """Append one typed event to the append-only JSONL stream.
+
+        The stream (events.jsonl) is a shadow record: instance JSON remains
+        the source of truth, and events are appended in parallel so the
+        stream's shape can be validated ahead of the event-sourced flip.
+        One compact JSON object per line; the file is only ever appended,
+        never rewritten.
+        """
+        line = json.dumps(event, separators=(",", ":")) + "\n"
+        with open(self.events_path, "a") as f:
+            f.write(line)
 
     def _write(self, instance: ProcessInstance) -> None:
         path = self._active_path(instance.process_name, instance.instance_id)
