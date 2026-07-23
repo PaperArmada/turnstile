@@ -95,6 +95,34 @@ COORDINATOR_PROCESS = {
 }
 
 
+SIGNAL_DISPATCH_PROCESS = {
+    "name": "signal-dispatch-test",
+    "description": "Wait state whose signal target is a dispatch state",
+    "version": "1.0.0",
+    "states": [
+        {"id": "start", "type": "initial", "transitions": ["waitq"]},
+        {
+            "id": "waitq",
+            "type": "wait",
+            "signal": {
+                "name": "job_ready",
+                "required_fields": [{"key": "task_name"}],
+            },
+            "transitions": ["run_job"],
+        },
+        {
+            "id": "run_job",
+            "type": "dispatch",
+            "process": "child-task",
+            "parameter_map": {"task_name": "${task_name}"},
+            "immediate": "ready",
+        },
+        {"id": "ready", "transitions": ["shutdown"]},
+        {"id": "shutdown", "type": "terminal"},
+    ],
+}
+
+
 @pytest.fixture()
 def project(tmp_path) -> Path:
     """Project with every process the stream tests exercise."""
@@ -110,6 +138,9 @@ def project(tmp_path) -> Path:
     (proc_dir / "wait-test.yaml").write_text(yaml.dump(WAIT_PROCESS))
     (proc_dir / "coordinator.yaml").write_text(yaml.dump(COORDINATOR_PROCESS))
     (proc_dir / "child-task.yaml").write_text(yaml.dump(CHILD_PROCESS))
+    (proc_dir / "signal-dispatch-test.yaml").write_text(
+        yaml.dump(SIGNAL_DISPATCH_PROCESS)
+    )
     return tmp_path
 
 
@@ -205,6 +236,18 @@ class TestStartEvents:
         assert payload["initial_state"] == "start"
         assert payload["parameters"] == {"task_name": "build"}
         assert events[0]["process_name"] == "simple"
+
+    def test_started_event_carries_session_id(
+        self, engine: Engine, project: Path
+    ):
+        started = engine.start(
+            "simple", {"task_name": "t"}, session_id="sess-x"
+        )
+        iid = started["instance_id"]
+
+        events = _events_for(project, iid)
+        assert _types(events) == ["started"]
+        assert events[0]["session_id"] == "sess-x"
 
 
 class TestTransitionEvents:
@@ -302,7 +345,7 @@ class TestUndoEvents:
         iid = engine.start("simple", {"task_name": "t"})["instance_id"]
         await engine.transition(iid, "working")
         await engine.transition(iid, "review")
-        engine.undo(iid, "wrong branch")
+        engine.undo(iid, "wrong branch", session_id="s-undo")
 
         events = _events_for(project, iid)
         assert _types(events) == [
@@ -312,10 +355,11 @@ class TestUndoEvents:
             "undo",
         ]
         assert events[3]["payload"] == {
-            "undone_to_state": "review",
+            "removed_state": "review",
             "restored_state": "working",
             "reason": "wrong branch",
         }
+        assert events[3]["session_id"] == "s-undo"
 
 
 class TestHandoffEvents:
@@ -323,11 +367,12 @@ class TestHandoffEvents:
         self, engine: Engine, project: Path
     ):
         iid = engine.start("simple", {"task_name": "t"})["instance_id"]
-        engine.handoff(iid, "bob", "vacation coverage")
+        engine.handoff(iid, "bob", "vacation coverage", session_id="sess-h")
 
         events = _events_for(project, iid)
         assert _types(events) == ["started", "handoff"]
         assert events[1]["actor"] == "bob"
+        assert events[1]["session_id"] == "sess-h"
         assert events[1]["payload"] == {
             "from_user": "",
             "to_user": "bob",
@@ -460,6 +505,59 @@ class TestDispatchEvents:
         assert payload["parent_instance_id"] == pid
         assert payload["parameters"] == {"task_name": "build"}
         assert payload["assigned_to"] == "developer"
+
+
+class TestSignalIntoDispatchEvents:
+    async def test_signal_into_dispatch_emits_signal_then_dispatch(
+        self, engine: Engine, project: Path
+    ):
+        iid = engine.start("signal-dispatch-test")["instance_id"]
+        await engine.transition(iid, "waitq")
+        result = await engine.receive_signal(
+            iid,
+            "job_ready",
+            {"task_name": "build"},
+            target_state="run_job",
+        )
+        child_id = result["subprocess_started"]
+
+        events = _events_for(project, iid)
+        assert _types(events) == [
+            "started",
+            "transition",
+            "signal_received",
+            "dispatch",
+        ]
+        sig_payload = events[2]["payload"]
+        assert sig_payload["signal"] == "job_ready"
+        assert sig_payload["data"] == {"task_name": "build"}
+        assert sig_payload["from"] == "waitq"
+        assert sig_payload["to"] == "run_job"
+        dispatch_payload = events[3]["payload"]
+        assert dispatch_payload["from"] == "run_job"
+        assert dispatch_payload["to"] == "ready"
+        assert dispatch_payload["child_instance_id"] == child_id
+        assert dispatch_payload["child_process"] == "child-task"
+
+    async def test_signal_dispatched_child_gets_its_own_started_event(
+        self, engine: Engine, project: Path
+    ):
+        iid = engine.start("signal-dispatch-test")["instance_id"]
+        await engine.transition(iid, "waitq")
+        result = await engine.receive_signal(
+            iid,
+            "job_ready",
+            {"task_name": "build"},
+            target_state="run_job",
+        )
+        child_id = result["subprocess_started"]
+
+        child_events = _events_for(project, child_id)
+        assert _types(child_events) == ["started"]
+        assert child_events[0]["seq"] == 0
+        payload = child_events[0]["payload"]
+        assert payload["parent_instance_id"] == iid
+        assert payload["parameters"] == {"task_name": "build"}
 
 
 class TestSubprocessEvents:
@@ -640,6 +738,68 @@ class TestFoldReconstruction:
         assert folded["history"] == len(instance.history)
         assert folded["overrides"] == len(instance.overrides)
         assert folded["status"] == instance.status == "active"
+
+    async def test_fold_rebuilds_dispatch_instance(
+        self, engine: Engine, project: Path
+    ):
+        pid = engine.start("coordinator", {"task_name": "build"})[
+            "instance_id"
+        ]
+        await engine.transition(pid, "dispatch_work")
+
+        folded = fold(_events_for(project, pid))
+        instance = _store(project).load(pid)
+
+        assert folded["current_state"] == instance.current_state == "ready"
+        # manual transition plus the automatic dispatch continuation
+        assert folded["history"] == len(instance.history) == 2
+        assert folded["overrides"] == len(instance.overrides)
+        assert folded["status"] == instance.status == "active"
+
+
+# ---------------------------------------------------------------------------
+# Emission robustness
+# ---------------------------------------------------------------------------
+
+
+class TestEmissionRobustness:
+    async def test_non_serializable_metadata_still_emits_the_event(
+        self, engine: Engine, project: Path
+    ):
+        iid = engine.start("simple", {"task_name": "t"})["instance_id"]
+        stamp = datetime(2026, 7, 23, 12, 30, 0)
+        await engine.transition(iid, "working", metadata={"when": stamp})
+
+        events = _events_for(project, iid)
+        assert _types(events) == ["started", "transition"]
+        assert [e["seq"] for e in events] == [0, 1]
+        # the value survives in string form instead of the event being
+        # silently dropped while history keeps the entry
+        assert events[1]["payload"]["metadata"]["when"] == str(stamp)
+
+    async def test_failed_append_reuses_its_seq_leaving_no_gap(
+        self, engine: Engine, project: Path, monkeypatch
+    ):
+        iid = engine.start("simple", {"task_name": "t"})["instance_id"]
+
+        original = StateStore.append_event
+
+        def boom(self, event):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(StateStore, "append_event", boom)
+        await engine.transition(iid, "working")  # emission lost, fail-open
+        monkeypatch.setattr(StateStore, "append_event", original)
+        await engine.transition(iid, "review")
+
+        events = _events_for(project, iid)
+        assert _types(events) == ["started", "transition"]
+        assert [e["seq"] for e in events] == [0, 1]
+        # the reused seq-1 slot belongs to the later operation
+        assert events[1]["payload"]["to"] == "review"
+        # persisted counter agrees with the file
+        instance = _store(project).load(iid)
+        assert instance.event_seq == len(events)
 
 
 # ---------------------------------------------------------------------------

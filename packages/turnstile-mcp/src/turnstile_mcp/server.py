@@ -108,7 +108,7 @@ async def process_start(
         parameters: Optional key-value parameters for the process instance.
     """
     engine = _get_engine()
-    return engine.start(name, parameters)
+    return engine.start(name, parameters, session_id=_session_id)
 
 
 @mcp.tool()
@@ -285,7 +285,9 @@ async def process_handoff(
         reason: Why the handoff is happening.
     """
     engine = _get_engine()
-    return engine.handoff(instance_id, to_user, reason)
+    return engine.handoff(
+        instance_id, to_user, reason, session_id=_session_id
+    )
 
 
 @mcp.tool()

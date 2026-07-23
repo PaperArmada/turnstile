@@ -530,7 +530,9 @@ process_graph(name)
 ├── abandoned/                 # explicitly abandoned
 │   └── 2026-02/
 │       └── feature-deploy-old123.json
-└── log.txt                    # append-only event log
+└── log.txt                    # append-only human-readable log
+└── events.jsonl               # append-only typed event stream (shadow;
+                               # see reference.md "Event stream")
 ```
 
 This entire directory should be gitignored. State is local and ephemeral (tied to

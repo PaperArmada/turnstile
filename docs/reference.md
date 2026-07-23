@@ -328,10 +328,39 @@ Process state is stored in `.process-state/` (add to `.gitignore`):
   active/          # Currently running instances
   completed/       # Finished instances (archived by month)
   abandoned/       # Abandoned instances (archived by month)
-  log.txt          # Append-only event log
+  log.txt          # Append-only human-readable log
+  events.jsonl     # Append-only typed event stream (shadow)
 ```
 
 Each instance is a JSON file containing the current state, full history, parameters, and any overrides.
+
+### Event stream
+
+Every state mutation appends one (or a documented set of) typed events to
+`events.jsonl`: one compact JSON object per line, with `event_type`,
+`instance_id`, `process_name`, a per-instance `seq`, `at`, `session_id`,
+`actor`, and `payload`. Event types: `started`, `transition`, `dispatch`,
+`subprocess_started`, `signal_received`, `skip`, `undo`, `abandon`,
+`complete`, `handoff`, `parent_resumed`. Transition-shaped payloads carry
+the full history-entry data.
+
+Consumer contract for the stream, which is a **shadow record** while the
+instance JSON remains the source of truth:
+
+- Events are appended immediately before the persist that lands the
+  mutation, and emission is fail-open. Two consequences: the stream can
+  contain an event for a mutation that failed to persist, and a dropped
+  append reuses its sequence number. Consumers must treat instance JSON as
+  authoritative and dedupe on `(instance_id, seq)`, keeping the last
+  occurrence.
+- Sequence numbers assume a single writer per instance; concurrent
+  sessions mutating one instance can produce duplicate numbers.
+- The stream is not fsynced (instance writes are), so a crash can lose
+  tail events that the instance JSON reflects.
+- An engine older than the stream that loads and re-saves an instance
+  resets its `seq` counter, after which new events reuse low numbers.
+- The stream never expires: parameters, signal data, and metadata written
+  to it persist even after instance files are deleted.
 
 ## Enforcement
 

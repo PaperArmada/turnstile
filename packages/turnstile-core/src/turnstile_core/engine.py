@@ -303,6 +303,13 @@ class Engine:
         validated shape for the future event-sourced substrate. Emission
         never blocks the operation: a failed append is logged and swallowed
         (fail open), because the shadow stream must not break live work.
+
+        Contract consequences of this ordering (see docs/reference.md,
+        "Event stream"): if the persist fails AFTER the append, the stream
+        holds an event for a mutation that never landed, and a retried
+        operation re-emits at the same seq. Consumers must treat instance
+        JSON as truth and dedupe on (instance_id, seq), keeping the last
+        occurrence. Sequence numbers assume a single writer per instance.
         """
         event = {
             "event_type": event_type,
@@ -322,6 +329,7 @@ class Engine:
                 event_type,
                 instance.process_name,
                 instance.instance_id,
+                exc_info=True,
             )
         else:
             # Increment only on a successful append so the stream stays
@@ -348,6 +356,7 @@ class Engine:
         self,
         name: str,
         parameters: dict[str, str] | None = None,
+        session_id: str = "",
     ) -> dict[str, Any]:
         """Start a new process instance."""
         defn, def_hash = self._get_definition(name)
@@ -380,6 +389,7 @@ class Engine:
                 "definition_hash": def_hash,
                 "started_by": instance.started_by,
             },
+            session_id=session_id,
         )
         self._store.save(instance)
 
@@ -823,7 +833,8 @@ class Engine:
             self._store.complete(instance)
             # Check if this child completing should resume a parent
             parent_info = self._resume_parent(
-                instance, "completed", child_terminal_state=target_state
+                instance, "completed", child_terminal_state=target_state,
+                session_id=session_id,
             )
             # Fire on_complete notification
             await self._notify("on_complete", {
@@ -1018,6 +1029,7 @@ class Engine:
         child: ProcessInstance,
         outcome: str,
         child_terminal_state: str | None = None,
+        session_id: str = "",
     ) -> dict[str, Any] | None:
         """Resume a parent after subprocess completion or abandonment.
 
@@ -1063,6 +1075,7 @@ class Engine:
                 "outcome": outcome,
                 "available_transitions": available,
             },
+            session_id=session_id,
         )
         self._store.save(parent)
 
@@ -1452,7 +1465,9 @@ class Engine:
         }
 
         # If this was a child process, resume the parent
-        parent_info = self._resume_parent(instance, "abandoned")
+        parent_info = self._resume_parent(
+            instance, "abandoned", session_id=session_id
+        )
         if parent_info:
             result["parent_resumed"] = True
             result["parent_instance_id"] = parent_info["parent_instance_id"]
@@ -1492,7 +1507,7 @@ class Engine:
             "undo",
             instance,
             {
-                "undone_to_state": last.to_state,
+                "removed_state": last.to_state,
                 "restored_state": previous_state,
                 "reason": reason,
             },
@@ -1513,7 +1528,8 @@ class Engine:
         )
 
     def handoff(
-        self, instance_id: str, to_user: str, reason: str
+        self, instance_id: str, to_user: str, reason: str,
+        session_id: str = "",
     ) -> dict[str, Any]:
         """Log an ownership transfer (metadata only)."""
         instance = self._store.load(instance_id)
@@ -1527,6 +1543,7 @@ class Engine:
                 "to_user": to_user,
                 "reason": reason,
             },
+            session_id=session_id,
             actor=to_user,
         )
         self._store.save(instance)

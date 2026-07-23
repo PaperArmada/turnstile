@@ -9,6 +9,17 @@ described in [STABILITY.md](STABILITY.md).
 
 ### Added
 
+- **Typed event stream** (`.process-state/events.jsonl`) — every state
+  mutation appends a typed event (started, transition, dispatch,
+  subprocess_started, signal_received, skip, undo, abandon, complete,
+  handoff, parent_resumed) with per-instance sequence numbers and session
+  attribution. Append-only shadow record: instance JSON remains the source
+  of truth; the stream's consumer contract is documented in
+  docs/reference.md. Replaces nothing yet — it is the seed of the
+  event-sourced substrate (#24) and validates fold-reconstruction ahead of
+  that flip. (#29)
+- `start`, `abandon`, `undo`, and `handoff` accept a `session_id` for audit
+  attribution; the MCP server passes its session automatically.
 - `turnstile history <instance_id>` — render the recorded trajectory of an
   instance (active or archived): every transition with actor attribution
   (triggered_by, role, session), validation gate results, structured

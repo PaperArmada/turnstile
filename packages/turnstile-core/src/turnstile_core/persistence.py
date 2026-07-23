@@ -346,9 +346,16 @@ class StateStore:
         the source of truth, and events are appended in parallel so the
         stream's shape can be validated ahead of the event-sourced flip.
         One compact JSON object per line; the file is only ever appended,
-        never rewritten.
+        never rewritten. Non-JSON-native payload values are stringified
+        (default=str) rather than dropping the event: a silently missing
+        event would make the stream diverge from history undetectably.
+
+        Unlike instance writes there is no fsync here; losing tail events
+        to a crash is acceptable for a shadow stream, torn instance JSON is
+        not. See docs/reference.md ("Event stream") for the consumer
+        contract.
         """
-        line = json.dumps(event, separators=(",", ":")) + "\n"
+        line = json.dumps(event, separators=(",", ":"), default=str) + "\n"
         with open(self.events_path, "a") as f:
             f.write(line)
 
