@@ -19,6 +19,10 @@ uv.lock
 .mcp.json
 .claude/
 
+# Personal agent memory kit (precompact-checkpoint-kit) — not committed
+CLAUDE.local.md
+memory/
+
 # Generated JSON schemas (regenerate with `turnstile schema`)
 .processes/schemas/
 

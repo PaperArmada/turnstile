@@ -67,6 +67,10 @@ This generates:
 
 No local clone needed. Restart Claude Code and the process tools are available.
 
+A fresh install in a clean container (one command, no ambient state):
+
+![turnstile init from the pinned v0.1.0 tag: uvx install and the generated files](assets/quickstart.gif)
+
 For turnstile development (live code changes), use dev mode:
 
 ```bash
