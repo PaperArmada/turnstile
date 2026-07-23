@@ -142,6 +142,7 @@ states:
 | Tool | Purpose |
 |------|---------|
 | `process_list` | Show available process definitions |
+| `process_info` | Show a definition's parameters, states, and gates |
 | `process_start` | Start a new process instance |
 | `process_status` | Check active instances and their current state |
 | `process_transition` | Move to the next state (runs validation gates) |
@@ -330,7 +331,7 @@ Each instance is a JSON file containing the current state, full history, paramet
 
 Turnstile can enforce process compliance by integrating with Claude Code's PreToolUse hooks. When enabled, the Edit and Write tools are gated on having an active process instance whose current state permits edits.
 
-The hook matches the Edit and Write tools; it does not parse the contents of shell commands. Command-level Bash file mutations are therefore outside its scope — a state can deny the Bash tool wholesale through `permissions`, but Turnstile does not inspect shell command text to decide whether a particular command mutates a file.
+The hook matches the Edit and Write tools only; it does not gate the Bash tool or parse the contents of shell commands. Command-level file mutations (for example `sed -i`, `tee`, or a shell redirect) are therefore outside its scope: Turnstile does not inspect shell command text to decide whether a command mutates a file.
 
 Three modes:
 
@@ -354,7 +355,7 @@ turnstile enforce off
 turnstile enforce status
 ```
 
-Enforcement is configured in `registry.yaml` under `settings.enforcement` and works via a PreToolUse hook in `.claude/settings.json` that calls `turnstile guard`. When several process instances are active, the most restrictive one wins: an edit is blocked if any active instance forbids it (a second, more permissive instance cannot lift another's restriction). The guard fails open on unexpected internal errors so a bug never hard-blocks the agent, with one deliberate exception: a corrupt or unreadable state file is treated as unknown state and blocks in `enforce` mode (warns in `monitor`) rather than being silently ignored.
+Enforcement is configured in `registry.yaml` under `settings.enforcement` and works via a PreToolUse hook in `.claude/settings.json` that calls `turnstile guard`. When several process instances are active, the most restrictive one wins: an edit is blocked if any active instance forbids it (a second, more permissive instance cannot lift another's restriction). The guard fails open on unexpected internal errors so a bug never hard-blocks the agent, with one deliberate exception: when enforcement is on but its state cannot be determined — a corrupt state file, an unreadable `registry.yaml`, a definition that will not load, or an unresolved definition for a live instance — the guard fails closed rather than silently allowing. It blocks in `enforce` mode and warns in `monitor` mode; if the failure prevents reading the mode itself (an unreadable `registry.yaml`), it blocks unconditionally, because it cannot prove enforcement is off.
 
 ## Starter pack
 

@@ -39,9 +39,10 @@ the trust boundary:
   value cannot inject shell syntax into a command. Gate and hook command
   *templates themselves* are trusted (they come from the definition).
 - **Enforcement scope.** The Claude Code guard gates the Edit and Write tools
-  at the hook layer. It does not parse shell command contents; a state can deny
-  the Bash tool wholesale, but Turnstile does not inspect a command to decide
-  whether it mutates a file. Enforcement is one layer, not a sandbox.
+  at the hook layer. It does not gate the Bash tool and does not parse shell
+  command contents, so a command that mutates a file (`sed -i`, `tee`, a shell
+  redirect, `python -c`) runs outside enforcement. Enforcement is one
+  cooperative layer over a trusted agent, not a sandbox.
 
 Reports that amount to "a process definition I wrote can run a command I put in
 it" are working as designed, not vulnerabilities. Reports of one actor's
