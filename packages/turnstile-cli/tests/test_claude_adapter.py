@@ -449,9 +449,12 @@ class TestRunGuard:
         run_guard()
 
         captured = capsys.readouterr()
-        if captured.out.strip():
-            response = json.loads(captured.out)
-            assert response["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert captured.out.strip(), (
+            "enforce mode with no active instance must emit a deny response; "
+            "silence means run_guard failed open"
+        )
+        response = json.loads(captured.out)
+        assert response["hookSpecificOutput"]["permissionDecision"] == "deny"
 
     def test_guard_with_off_no_output(self, tmp_path, monkeypatch, capsys):
         _setup_project(tmp_path, enforcement="off")
@@ -499,9 +502,36 @@ class TestRunGuard:
         run_guard()
 
         captured = capsys.readouterr()
-        if captured.out.strip():
-            response = json.loads(captured.out)
-            hook_output = response["hookSpecificOutput"]
-            assert hook_output["permissionDecision"] == "allow"
-            assert "simple" in hook_output["additionalContext"]
-            assert "start" in hook_output["additionalContext"]
+        assert captured.out.strip(), (
+            "monitor mode with an active instance must emit an allow-plus-"
+            "context response; silence means run_guard failed open"
+        )
+        response = json.loads(captured.out)
+        hook_output = response["hookSpecificOutput"]
+        assert hook_output["permissionDecision"] == "allow"
+        assert "simple" in hook_output["additionalContext"]
+        assert "start" in hook_output["additionalContext"]
+
+    def test_guard_with_monitor_no_active_warns(self, tmp_path, monkeypatch, capsys):
+        """Monitor mode with no active process allows the edit but warns."""
+        _setup_project(tmp_path, enforcement="monitor")
+
+        hook_input = json.dumps({
+            "session_id": "test-session",
+            "cwd": str(tmp_path),
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/some/file.py", "content": "x = 1"},
+        })
+
+        monkeypatch.setattr("sys.stdin", io.StringIO(hook_input))
+        run_guard()
+
+        captured = capsys.readouterr()
+        assert captured.out.strip(), (
+            "monitor mode with no active instance must emit an allow-plus-"
+            "warning response; silence means run_guard failed open"
+        )
+        response = json.loads(captured.out)
+        hook_output = response["hookSpecificOutput"]
+        assert hook_output["permissionDecision"] == "allow"
+        assert hook_output["additionalContext"].startswith("WARNING:")
