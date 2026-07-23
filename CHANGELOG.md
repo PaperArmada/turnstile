@@ -5,7 +5,7 @@ All notable changes to Turnstile are recorded here. The format follows
 adheres to [Semantic Versioning](https://semver.org/) with the pre-1.0 caveat
 described in [STABILITY.md](STABILITY.md).
 
-## [Unreleased]
+## [0.1.2] - 2026-07-23
 
 ### Added
 
@@ -47,6 +47,9 @@ described in [STABILITY.md](STABILITY.md).
 - Gate and action commands that emit non-UTF-8 bytes no longer raise
   `UnicodeDecodeError` out of the command runner; output is decoded
   lossily (`errors="replace"`).
+- Generated configs pin the current release tag: `TURNSTILE_REF` was
+  still `v0.1.0` in v0.1.1, so `turnstile init` on v0.1.1 produced
+  configs one release behind the CLI that wrote them.
 
 ## [0.1.1] - 2026-07-23
 

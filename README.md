@@ -36,12 +36,12 @@ Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 In your project directory:
 
 ```bash
-uvx --python 3.12 --from "turnstile-cli @ git+https://github.com/PaperArmada/turnstile.git@v0.1.1#subdirectory=packages/turnstile-cli" turnstile init
+uvx --python 3.12 --from "turnstile-cli @ git+https://github.com/PaperArmada/turnstile.git@v0.1.2#subdirectory=packages/turnstile-cli" turnstile init
 ```
 
 This generates the MCP server config, registry, Claude Code guard hook, and gitignore entries; process definitions already in `.processes/` are registered automatically. Enforcement starts in monitor mode (warnings only; `turnstile enforce off` disables it). Restart Claude Code and the process tools are available.
 
-The generated config pins to a release tag (`@v0.1.1`), so installs are reproducible. To upgrade, bump the tag in `.mcp.json` and `.claude/settings.json` and run `uvx --refresh`, then refresh the starter definitions with `turnstile update --apply`.
+The generated config pins to a release tag (`@v0.1.2`), so installs are reproducible. To upgrade, bump the tag in `.mcp.json` and `.claude/settings.json` and run `uvx --refresh`, then refresh the starter definitions with `turnstile update --apply`.
 
 For the full walkthrough (writing a process, driving it from an agent, and skipping a state), see [docs/quickstart.md](docs/quickstart.md).
 
