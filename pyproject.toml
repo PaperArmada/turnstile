@@ -4,8 +4,8 @@ version = "0.1.0"
 description = "Process engine for AI agents"
 requires-python = ">=3.12"
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
 ]

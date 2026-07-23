@@ -66,6 +66,8 @@ Turnstile is pre-1.0. The core engine (initial/normal/terminal states, validatio
 - [Stability and versioning](STABILITY.md) — what's frozen, what may evolve
 - [Vision](docs/vision.md) — north star, identity, capability layers
 - [Design principles](docs/principles/) — progressive disclosure, render don't record, single process single document, fail open
+- [Security policy](SECURITY.md) — trust boundary and how to report a vulnerability
+- [Changelog](CHANGELOG.md) — release history
 
 ## Dogfooding
 
