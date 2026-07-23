@@ -203,6 +203,35 @@ class TestRunCommand:
         with pytest.raises(asyncio.TimeoutError):
             await run_command("sleep 10", tmp_path, timeout=1)
 
+    @pytest.mark.asyncio
+    async def test_non_utf8_output_surfaces_as_replacement_chars(
+        self, tmp_path
+    ):
+        # \377\376 are octal escapes for 0xff 0xfe: invalid UTF-8. The
+        # runner must return garbled text, not raise UnicodeDecodeError.
+        output, code = await run_command("printf '\\377\\376'", tmp_path)
+        assert code == 0
+        assert output == "��"
+
+    @pytest.mark.asyncio
+    async def test_stderr_is_excluded_by_default(self, tmp_path):
+        # gates match expect against stdout only; stderr noise must not
+        # perturb them
+        output, code = await run_command(
+            "echo out; echo err >&2", tmp_path
+        )
+        assert output == "out"
+        assert code == 0
+
+    @pytest.mark.asyncio
+    async def test_merge_stderr_interleaves_diagnostics(self, tmp_path):
+        output, code = await run_command(
+            "echo out; echo err >&2", tmp_path, merge_stderr=True
+        )
+        assert "out" in output
+        assert "err" in output
+        assert code == 0
+
 
 # ---------------------------------------------------------------------------
 # run_validation

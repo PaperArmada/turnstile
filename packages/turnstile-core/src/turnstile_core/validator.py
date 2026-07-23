@@ -188,8 +188,14 @@ async def run_command(
     cwd: Path,
     timeout: int = 60,
     parameters: dict[str, str] | None = None,
+    merge_stderr: bool = False,
 ) -> tuple[str, int]:
     """Run a shell command and return (stdout_stripped, exit_code).
+
+    With ``merge_stderr`` the child's stderr is interleaved into stdout at
+    the pipe level, so the returned text includes diagnostics (tracebacks,
+    "command not found"). Validation gates keep the default separation so
+    ``expect`` matching is not perturbed by stderr noise.
 
     Process parameters are supplied to the shell as environment variables
     rather than being interpolated into the command text. The shell expands
@@ -220,7 +226,10 @@ async def run_command(
     proc = await asyncio.create_subprocess_shell(
         command,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+        stderr=(
+            asyncio.subprocess.STDOUT if merge_stderr
+            else asyncio.subprocess.PIPE
+        ),
         cwd=str(cwd),
         env=env,
     )

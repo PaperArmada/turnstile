@@ -30,9 +30,9 @@ described in [STABILITY.md](STABILITY.md).
   recorded.
 - **Action failures are observable** — an `on_enter`/`on_exit` action that
   fails (non-zero exit, timeout, or execution error) emits an
-  `action_failed` event to the stream and an `ACTION FAILED` line to
-  log.txt. Actions still never block the state change. Previously every
-  action failure was silently swallowed. (#31)
+  `action_failed` event to the stream (with stdout+stderr tail) and an
+  `ACTION FAILED` line to log.txt. Actions still never block the state
+  change. Previously every action failure was silently swallowed. (#31)
 
 ### Fixed
 

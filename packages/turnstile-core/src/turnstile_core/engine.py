@@ -520,7 +520,7 @@ class Engine:
         instance: ProcessInstance,
         validation_params: dict[str, str],
         session_id: str = "",
-    ) -> None:
+    ) -> bool:
         """Run a state's on_enter/on_exit actions (non-blocking side effects).
 
         ``phase`` is ``"on_exit"`` or ``"on_enter"``. Shared by transition and
@@ -531,11 +531,18 @@ class Engine:
         swallowed: a non-zero exit or an execution error emits an
         ``action_failed`` event to the stream and appends a line to log.txt.
         Actions are side effects in the audit layer itself (notifications,
-        markers); a failure that vanishes without trace is data loss.
+        markers); a failure that vanishes without trace is data loss. The
+        recording itself is fail-open, matching _emit: an unwritable log.txt
+        must not abort a state change either.
+
+        Returns True if any ``action_failed`` event was emitted, so a caller
+        whose operation is later rejected can still persist the advanced
+        event_seq (see transition's enter-gate block path).
         """
         hooks = state.on_exit if phase == "on_exit" else state.on_enter
         if not (hooks and hooks.actions):
-            return
+            return False
+        emitted = False
         for action in hooks.actions:
             exit_code: int | None = None
             output = ""
@@ -543,31 +550,41 @@ class Engine:
             try:
                 output, exit_code = await run_command(
                     action.command, self.project_root, timeout=60,
-                    parameters=validation_params,
+                    parameters=validation_params, merge_stderr=True,
                 )
-            except (TimeoutError, OSError) as exc:
+            except (TimeoutError, OSError, ValueError) as exc:
+                # ValueError covers spawn-level rejects such as an embedded
+                # NUL in the command text; actions must stay non-blocking.
                 error = f"{type(exc).__name__}: {exc}"
             if exit_code == 0:
                 continue
+            emitted = True
             self._emit(
                 "action_failed",
                 instance,
                 payload={
                     "phase": phase,
                     "state": state.id,
-                    "command": action.command,
+                    "command": action.command[:500],
                     "exit_code": exit_code,
-                    "error": error,
+                    "error": error[:500],
                     "output": output[-500:],
                 },
                 session_id=session_id,
             )
             detail = f"exit {exit_code}" if exit_code is not None else error
-            self._store.append_log(
-                f"ACTION FAILED {instance.process_name}-"
-                f"{instance.instance_id} {phase} {state.id} "
-                f"({detail}): {action.command}"
-            )
+            log_command = " ".join(action.command.split())
+            try:
+                self._store.append_log(
+                    f"ACTION FAILED {instance.process_name}-"
+                    f"{instance.instance_id} {phase} {state.id} "
+                    f"({detail}): {log_command}"
+                )
+            except OSError:
+                logger.warning(
+                    "Failed to write ACTION FAILED log line", exc_info=True
+                )
+        return emitted
 
     async def transition(
         self, instance_id: str, target_state: str,
@@ -669,7 +686,7 @@ class Engine:
             )
 
         # Run on_exit actions for current state
-        await self._run_actions(
+        actions_emitted = await self._run_actions(
             current, "on_exit", instance, validation_params, session_id
         )
 
@@ -679,6 +696,14 @@ class Engine:
         )
         all_results.extend(enter_results)
         if enter_blocked:
+            if actions_emitted:
+                # An action_failed event consumed sequence numbers but the
+                # transition will not persist. Save the (otherwise
+                # unmutated) instance so the advanced event_seq lands and a
+                # retried transition cannot re-emit at the same seq, which
+                # would shadow the failure record under the consumers'
+                # dedupe-keep-last rule.
+                self._store.save(instance)
             return TransitionResult(
                 success=False,
                 new_state=instance.current_state,

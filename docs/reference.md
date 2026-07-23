@@ -347,10 +347,15 @@ payloads carry the full history-entry data.
 An `on_enter`/`on_exit` action that fails (non-zero exit, timeout, or
 execution error) never blocks the state change, but the failure is
 recorded: an `action_failed` event carrying the phase, state, command,
-exit code or error, and the tail of the command's output, plus an
-`ACTION FAILED` line in `log.txt`. Because actions run before the
-transition's own persist, an `action_failed` event can precede a
-transition that gates then reject; the dedupe rule below covers this.
+exit code or error, and the tail of the command's output (stdout and
+stderr merged), plus an `ACTION FAILED` line in `log.txt`. Two ordering
+notes. First, an exit-action failure can precede a transition that
+on_enter gates then reject; the engine persists the advanced `seq` in
+that case so a retried transition cannot reuse the failure's sequence
+number. Second, an on_enter action failure is appended *before* the
+`transition` event it belongs to, so a fold-based consumer sees the
+failure attributed to a state the stream has not yet entered; instance
+JSON remains authoritative.
 
 Consumer contract for the stream, which is a **shadow record** while the
 instance JSON remains the source of truth:
