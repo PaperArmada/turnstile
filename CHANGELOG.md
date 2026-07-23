@@ -7,6 +7,22 @@ described in [STABILITY.md](STABILITY.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Starter-pack gate variables now expand** — six validation gates across
+  `feature-development`, `bug-fix`-adjacent starters (`scientific-method`,
+  `spike`, `decision-record`, `peer-review`) wrapped `${var}` in shell
+  single quotes, so the variable never expanded: the issue-linkage gate
+  always reported "linked" and the skip-when-none / file-exists checks
+  tested a literal `${output_file}`. All six use the env-var-safe
+  double-quoted form now.
+- `feature-development`'s `test` state and `bug-fix`'s `reproduce` state
+  no longer forbid edits: test authoring happens in `test`, and writing a
+  failing repro test is the point of `reproduce`.
+- `test_command` parameter descriptions warn that the bare `pytest`
+  default resolves whatever is first on PATH in the gate's environment,
+  and show an explicit project-specific invocation.
+
 ### Changed
 
 - **Claude Code adapter extracted from core** — the CC-specific pieces

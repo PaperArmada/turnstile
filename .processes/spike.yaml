@@ -1,6 +1,6 @@
 name: spike
 description: "Time-boxed investigation with a written outcome"
-version: "1.0.0"
+version: "1.1.0"
 
 metadata:
   author: "turnstile"
@@ -45,7 +45,7 @@ states:
           severity: info
     on_exit:
       validate:
-        - command: "test '${output_file}' = 'none' && echo skip || (test -f '${output_file}' && echo exists || echo missing)"
+        - command: 'test "${output_file}" = "none" && echo skip || (test -f "${output_file}" && echo exists || echo missing)'
           expect: not_equals("missing")
           message: "Output file must exist if one was specified"
           severity: warning

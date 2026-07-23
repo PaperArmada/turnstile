@@ -1,6 +1,6 @@
 name: peer-review
 description: "Structured peer review with role handoff: submit, review, revise, accept"
-version: "1.0.0"
+version: "1.1.0"
 
 metadata:
   author: "turnstile"
@@ -40,7 +40,7 @@ states:
     transitions: [awaiting_review, abandoned]
     on_exit:
       validate:
-        - command: "test '${artifact_path}' = 'none' && echo skip || (test -e '${artifact_path}' && echo exists || echo missing)"
+        - command: 'test "${artifact_path}" = "none" && echo skip || (test -e "${artifact_path}" && echo exists || echo missing)'
           expect: not_equals("missing")
           message: "Artifact must exist if a path was specified"
           severity: warning

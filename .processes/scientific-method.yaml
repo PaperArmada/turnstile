@@ -1,6 +1,6 @@
 name: scientific-method
 description: "Structured investigation using the scientific method: observe, hypothesize, test, conclude"
-version: "1.0.0"
+version: "1.1.0"
 
 metadata:
   author: "turnstile"
@@ -47,7 +47,7 @@ states:
     transitions: [experiment, question]
     on_exit:
       validate:
-        - command: "test '${output_file}' = 'none' && echo skip || (grep -qi 'hypothes' '${output_file}' 2>/dev/null && echo found || echo missing)"
+        - command: 'test "${output_file}" = "none" && echo skip || (grep -qi hypothes "${output_file}" 2>/dev/null && echo found || echo missing)'
           expect: not_equals("missing")
           message: "Hypothesis should be documented before testing"
           severity: warning
@@ -65,7 +65,7 @@ states:
     transitions: [supported, refuted, inconclusive]
     on_exit:
       validate:
-        - command: "test '${output_file}' = 'none' && echo skip || (test -f '${output_file}' && echo exists || echo missing)"
+        - command: 'test "${output_file}" = "none" && echo skip || (test -f "${output_file}" && echo exists || echo missing)'
           expect: not_equals("missing")
           message: "Output file must exist if one was specified"
           severity: warning

@@ -1,6 +1,6 @@
 name: feature-development
 description: "Standard feature development workflow"
-version: "1.3.0"
+version: "1.4.0"
 
 metadata:
   author: "matt"
@@ -19,7 +19,7 @@ parameters:
     required: false
     default: "none"
   - name: test_command
-    description: "Command to run the test suite"
+    description: "Command to run the test suite. The default assumes pytest is on PATH in the gate's environment; pass your project's real invocation (e.g. 'uv run --group dev python -m pytest tests/') to avoid resolving a stray global pytest"
     required: false
     default: "pytest"
 
@@ -36,7 +36,9 @@ states:
     on_enter:
       validate:
         # Progressive disclosure: surface just enough context to plan the work
-        - command: "test '${issue_id}' != 'none' && echo 'linked to ${issue_id}' || echo 'no issue linked (consider passing issue_id)'"
+        # Double quotes: the shell must expand ${issue_id} (values arrive
+        # as env vars; single quotes would test the literal string)
+        - command: 'test "${issue_id}" != "none" && echo "linked to ${issue_id}" || echo "no issue linked (consider passing issue_id)"'
           expect: not_empty
           message: "Issue linkage check"
           severity: info
@@ -56,9 +58,7 @@ states:
     transitions: [test, understand, abandoned]
 
   - id: test
-    description: "Run the test suite and verify the changes"
-    permissions:
-      edit: false
+    description: "Write and run tests verifying the changes"
     transitions: [review, implement]
     on_enter:
       validate:

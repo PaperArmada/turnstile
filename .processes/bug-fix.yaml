@@ -1,6 +1,6 @@
 name: bug-fix
 description: "Structured bug fix workflow: reproduce, diagnose, fix, verify"
-version: "1.2.0"
+version: "1.3.0"
 
 metadata:
   author: "turnstile"
@@ -19,7 +19,7 @@ parameters:
     required: false
     default: "none"
   - name: test_command
-    description: "Command to run the test suite"
+    description: "Command to run the test suite. The default assumes pytest is on PATH in the gate's environment; pass your project's real invocation (e.g. 'uv run --group dev python -m pytest tests/') to avoid resolving a stray global pytest"
     required: false
     default: "pytest"
 
@@ -29,9 +29,7 @@ states:
     transitions: [reproduce]
 
   - id: reproduce
-    description: "Confirm the bug is reproducible before attempting a fix"
-    permissions:
-      edit: false
+    description: "Confirm the bug is reproducible before attempting a fix (writing a failing repro test here is encouraged)"
     transitions: [diagnose, abandoned]
     on_enter:
       validate:
