@@ -5,7 +5,7 @@ All notable changes to Turnstile are recorded here. The format follows
 adheres to [Semantic Versioning](https://semver.org/) with the pre-1.0 caveat
 described in [STABILITY.md](STABILITY.md).
 
-## [Unreleased]
+## [0.1.3] - 2026-07-23
 
 ### Fixed
 

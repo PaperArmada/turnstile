@@ -1,6 +1,6 @@
 [project]
 name = "turnstile-core"
-version = "0.1.2"
+version = "0.1.3"
 description = "Core engine: state machine, schema, persistence"
 requires-python = ">=3.12"
 dependencies = [
