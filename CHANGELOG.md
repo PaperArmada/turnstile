@@ -22,6 +22,11 @@ described in [STABILITY.md](STABILITY.md).
 - `test_command` parameter descriptions warn that the bare `pytest`
   default resolves whatever is first on PATH in the gate's environment,
   and show an explicit project-specific invocation.
+- A regression test now runs the shipped starter gates through the real
+  command runner and structurally sweeps every bundled command for the
+  single-quoted-`${var}` anti-pattern; the sweep immediately caught a
+  seventh instance (`Domain: ${domain}` display gates in
+  `decision-record` and `scientific-method`), also fixed.
 
 ### Changed
 

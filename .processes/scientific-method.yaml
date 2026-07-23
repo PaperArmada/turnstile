@@ -1,6 +1,6 @@
 name: scientific-method
 description: "Structured investigation using the scientific method: observe, hypothesize, test, conclude"
-version: "1.1.0"
+version: "1.1.1"
 
 metadata:
   author: "turnstile"
@@ -33,7 +33,7 @@ states:
     transitions: [question, abandoned]
     on_enter:
       validate:
-        - command: "echo 'Domain: ${domain}'"
+        - command: 'echo "Domain: ${domain}"'
           expect: not_empty
           message: "Investigation domain context"
           severity: info

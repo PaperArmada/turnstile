@@ -1,6 +1,6 @@
 name: decision-record
 description: "Structured decision-making process producing an auditable record of context, options, and rationale"
-version: "1.1.0"
+version: "1.1.1"
 
 metadata:
   author: "turnstile"
@@ -33,7 +33,7 @@ states:
     transitions: [gather, abandoned]
     on_enter:
       validate:
-        - command: "echo 'Domain: ${domain}'"
+        - command: 'echo "Domain: ${domain}"'
           expect: not_empty
           message: "Decision domain context"
           severity: info
