@@ -681,19 +681,18 @@ class TestFailureDiagnostics:
         )
 
     async def test_unwritable_log_does_not_abort_the_transition(
-        self, engine: Engine, project: Path, monkeypatch
+        self, engine: Engine, project: Path
     ):
-        original = engine._store.append_log
-
-        def flaky_append(message: str) -> None:
-            if message.startswith("ACTION FAILED"):
-                raise OSError("read-only filesystem")
-            original(message)
-
-        monkeypatch.setattr(engine._store, "append_log", flaky_append)
-
+        # append_log is fail-open at the store level, so a read-only
+        # log.txt (the realistic failure) must not abort any state
+        # operation. Start first (so the log file exists), then lock it.
         iid = engine.start("enter-fail")["instance_id"]
-        result = await engine.transition(iid, "work")
+        log_path = project / ".process-state" / "log.txt"
+        log_path.chmod(0o444)
+        try:
+            result = await engine.transition(iid, "work")
+        finally:
+            log_path.chmod(0o644)
 
         assert result.success is True
         assert result.new_state == "work"

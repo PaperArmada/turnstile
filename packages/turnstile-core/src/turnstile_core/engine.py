@@ -575,16 +575,13 @@ class Engine:
             )
             detail = f"exit {exit_code}" if exit_code is not None else error
             log_command = " ".join(action.command.split())
-            try:
-                self._store.append_log(
-                    f"ACTION FAILED {instance.process_name}-"
-                    f"{instance.instance_id} {phase} {state.id} "
-                    f"({detail}): {log_command}"
-                )
-            except OSError:
-                logger.warning(
-                    "Failed to write ACTION FAILED log line", exc_info=True
-                )
+            # append_log is fail-open at the store level; an unwritable
+            # log.txt cannot abort the state change.
+            self._store.append_log(
+                f"ACTION FAILED {instance.process_name}-"
+                f"{instance.instance_id} {phase} {state.id} "
+                f"({detail}): {log_command}"
+            )
         return emitted
 
     async def _enter_state(

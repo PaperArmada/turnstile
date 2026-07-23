@@ -13,9 +13,25 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from turnstile_core.errors import InstanceNotFoundError
+from turnstile_core.errors import CorruptInstanceError, InstanceNotFoundError
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_instance(path: Path) -> ProcessInstance:
+    """Parse one instance state file, naming the file on failure.
+
+    A torn or hand-mangled JSON file used to surface as a bare
+    JSONDecodeError/ValidationError with no hint of WHICH file was bad;
+    with monthly archive subdirectories that made recovery a hunt.
+    """
+    try:
+        data = json.loads(path.read_text())
+        return ProcessInstance(**data)
+    except Exception as e:
+        raise CorruptInstanceError(
+            f"Instance state file is unreadable: {path} ({e})"
+        ) from e
 
 
 # ---------------------------------------------------------------------------
@@ -199,8 +215,7 @@ class StateStore:
         """Load an active instance by ID. Raises InstanceNotFoundError."""
         for path in self.active_dir.iterdir():
             if _matches_id(path, instance_id):
-                data = json.loads(path.read_text())
-                return ProcessInstance(**data)
+                return _parse_instance(path)
 
         # Check archived directories for a better error message
         for label, archive_dir in (
@@ -224,15 +239,13 @@ class StateStore:
         # Try active first
         for path in self.active_dir.iterdir():
             if _matches_id(path, instance_id):
-                data = json.loads(path.read_text())
-                return ProcessInstance(**data)
+                return _parse_instance(path)
 
         # Search archived directories (organized by month)
         for archive_dir in (self.completed_dir, self.abandoned_dir):
             for path in archive_dir.rglob("*.json"):
                 if _matches_id(path, instance_id):
-                    data = json.loads(path.read_text())
-                    return ProcessInstance(**data)
+                    return _parse_instance(path)
 
         raise InstanceNotFoundError(
             f"No instance with ID '{instance_id}' (checked active, "
@@ -321,23 +334,35 @@ class StateStore:
         """List all completed process instances."""
         instances = []
         for path in self.completed_dir.rglob("*.json"):
-            data = json.loads(path.read_text())
-            instances.append(ProcessInstance(**data))
+            instances.append(_parse_instance(path))
         return instances
 
     def list_abandoned(self) -> list[ProcessInstance]:
         """List all abandoned process instances."""
         instances = []
         for path in self.abandoned_dir.rglob("*.json"):
-            data = json.loads(path.read_text())
-            instances.append(ProcessInstance(**data))
+            instances.append(_parse_instance(path))
         return instances
 
     def append_log(self, event: str) -> None:
-        """Append an event to the log file."""
+        """Append an event to the log file.
+
+        Fail-open: log.txt is a human-readable convenience view, so an
+        unwritable log (read-only file, full disk) must not abort the
+        state operation it narrates. The instance JSON and the event
+        stream remain the records that matter. Before this guard, a log
+        write failure could raise AFTER an operation had already
+        persisted, reporting failure for work that landed.
+        """
         timestamp = _now_iso()
-        with open(self.log_path, "a") as f:
-            f.write(f"[{timestamp}] {event}\n")
+        try:
+            with open(self.log_path, "a") as f:
+                f.write(f"[{timestamp}] {event}\n")
+        except OSError:
+            logger.warning(
+                "Failed to append to process log %s", self.log_path,
+                exc_info=True,
+            )
 
     def append_event(self, event: dict[str, Any]) -> None:
         """Append one typed event to the append-only JSONL stream.

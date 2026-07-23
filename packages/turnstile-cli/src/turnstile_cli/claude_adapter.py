@@ -21,6 +21,23 @@ from pathlib import Path
 from typing import Any
 
 from turnstile_core.enforcement import EnforcementResult, check_enforcement
+from turnstile_core.persistence import _atomic_write_text
+
+
+def _load_settings(settings_path: Path) -> dict[str, Any]:
+    """Parse .claude/settings.json, failing with an actionable message.
+
+    A corrupt settings file must produce a clear error naming the file,
+    not a traceback, and must never be silently overwritten: it can
+    carry non-turnstile configuration the user would lose.
+    """
+    try:
+        return json.loads(settings_path.read_text())
+    except (OSError, ValueError) as e:
+        raise ValueError(
+            f"Cannot read {settings_path}: {e}. Fix or remove the file, "
+            f"then re-run; turnstile will not overwrite it."
+        ) from e
 
 
 def _find_turnstile_root() -> str:
@@ -249,7 +266,7 @@ def install_enforcement(
     if mode == "off":
         # Remove hook from settings if present
         if settings_path.exists():
-            settings = json.loads(settings_path.read_text())
+            settings = _load_settings(settings_path)
             hooks = settings.get("hooks", {})
             pre_tool = hooks.get("PreToolUse", [])
             # Remove turnstile entries, preserving co-grouped hooks
@@ -262,7 +279,9 @@ def install_enforcement(
                 settings["hooks"] = hooks
             else:
                 settings.pop("hooks", None)
-            settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+            _atomic_write_text(
+                settings_path, json.dumps(settings, indent=2) + "\n"
+            )
 
         return {
             "installed": True,
@@ -278,7 +297,7 @@ def install_enforcement(
     settings_dir.mkdir(parents=True, exist_ok=True)
 
     if settings_path.exists():
-        settings = json.loads(settings_path.read_text())
+        settings = _load_settings(settings_path)
     else:
         settings = {}
 
@@ -295,7 +314,7 @@ def install_enforcement(
     existing_hooks["PreToolUse"] = existing_pre_tool
     settings["hooks"] = existing_hooks
 
-    settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+    _atomic_write_text(settings_path, json.dumps(settings, indent=2) + "\n")
 
     return {
         "installed": True,

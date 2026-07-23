@@ -21,6 +21,10 @@ class InstanceNotFoundError(TurnstileError):
     """Referenced process instance does not exist."""
 
 
+class CorruptInstanceError(TurnstileError):
+    """An instance state file exists but cannot be parsed."""
+
+
 class ProcessNotFoundError(TurnstileError):
     """Referenced process definition does not exist."""
 

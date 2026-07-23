@@ -1384,11 +1384,11 @@ def init(
     # .claude/settings.json (enforcement hook)
     if enforce_mode != "off":
         if dev:
-            result = install_enforcement(
+            result = _install_enforcement_or_exit(
                 root, enforce_mode, turnstile_dir=turnstile_dir
             )
         else:
-            result = install_enforcement(
+            result = _install_enforcement_or_exit(
                 root, enforce_mode, repo_url=repo_url
             )
         created.append(f".claude/settings.json ({enforce_mode} mode)")
@@ -1485,6 +1485,19 @@ def guard() -> None:
     run_guard()
 
 
+def _install_enforcement_or_exit(*args, **kwargs) -> dict:
+    """Call install_enforcement, turning its ValueError into a clean exit.
+
+    A corrupt .claude/settings.json raises with an actionable message;
+    the CLI should print it, not a traceback.
+    """
+    try:
+        return install_enforcement(*args, **kwargs)
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1)
+
+
 @cli.group()
 def enforce() -> None:
     """Manage enforcement mode."""
@@ -1527,11 +1540,11 @@ def enforce_on(ctx: click.Context, dev: bool, turnstile_dir: str | None, repo: s
     root = Path(ctx.obj["project"]) if ctx.obj.get("project") else Path.cwd()
     update_registry_enforcement(root, "enforce")
     if dev:
-        result = install_enforcement(
+        result = _install_enforcement_or_exit(
             root, "enforce", turnstile_dir=turnstile_dir or _find_turnstile_root()
         )
     else:
-        result = install_enforcement(
+        result = _install_enforcement_or_exit(
             root, "enforce", repo_url=repo or TURNSTILE_REPO_URL
         )
     click.echo(f"Enforcement enabled: {result['message']}")
@@ -1548,11 +1561,11 @@ def enforce_monitor(ctx: click.Context, dev: bool, turnstile_dir: str | None, re
     root = Path(ctx.obj["project"]) if ctx.obj.get("project") else Path.cwd()
     update_registry_enforcement(root, "monitor")
     if dev:
-        result = install_enforcement(
+        result = _install_enforcement_or_exit(
             root, "monitor", turnstile_dir=turnstile_dir or _find_turnstile_root()
         )
     else:
-        result = install_enforcement(
+        result = _install_enforcement_or_exit(
             root, "monitor", repo_url=repo or TURNSTILE_REPO_URL
         )
     click.echo(f"Monitor mode enabled: {result['message']}")
@@ -1565,7 +1578,7 @@ def enforce_off(ctx: click.Context) -> None:
     """Disable enforcement and remove the Claude Code hook."""
     root = Path(ctx.obj["project"]) if ctx.obj.get("project") else Path.cwd()
     update_registry_enforcement(root, "off")
-    result = install_enforcement(root, "off")
+    result = _install_enforcement_or_exit(root, "off")
     click.echo(f"Enforcement disabled: {result['message']}")
 
 
