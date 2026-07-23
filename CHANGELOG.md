@@ -5,6 +5,25 @@ All notable changes to Turnstile are recorded here. The format follows
 adheres to [Semantic Versioning](https://semver.org/) with the pre-1.0 caveat
 described in [STABILITY.md](STABILITY.md).
 
+## [Unreleased]
+
+### Changed
+
+- **Claude Code adapter extracted from core** — the CC-specific pieces
+  (hook JSON parsing, response shapes, `.claude/settings.json`
+  installation, pinned guard commands) moved from `turnstile_core.guard`
+  to `turnstile_cli.claude_adapter`; `turnstile-core` no longer knows any
+  runtime's hook formats. The agnostic contract every adapter consumes is
+  `turnstile_core.enforcement.check_enforcement` / `EnforcementResult`.
+  `update_registry_enforcement` (runtime-agnostic) moved to
+  `turnstile_core.loader`. The `turnstile guard` entry point is
+  unchanged. (#32)
+- `Engine._enter_state` is the single canonical state-entry path for
+  transitions and signals; the duplicated dispatch-on-signal block is
+  gone. Zero behavioral change (equivalence-verified). Pre-existing
+  signal-entry asymmetries are now tracked as #41 and pinned by tests.
+  (#33)
+
 ## [0.1.2] - 2026-07-23
 
 ### Added

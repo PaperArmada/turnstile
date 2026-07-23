@@ -1,8 +1,14 @@
-"""Claude Code PreToolUse hook adapter for turnstile enforcement.
+"""Claude Code adapter for turnstile enforcement.
 
-This is the platform-specific adapter for Claude Code. It reads the CC
-hook JSON from stdin, delegates to the agent-agnostic enforcement module,
-and translates the result into CC hook response format.
+This is the platform-specific edge for Claude Code: it reads the CC
+PreToolUse hook JSON from stdin, delegates to the agent-agnostic
+enforcement contract in turnstile-core (`enforcement.check_enforcement`
+returning an `EnforcementResult`), and translates the result into CC's
+hook response shapes. It also owns installing/removing the hook in
+`.claude/settings.json` and building the pinned guard commands.
+
+turnstile-core knows nothing about Claude Code hook formats; any other
+runtime adapter should consume the same core contract this one does.
 
 Invoked as a Claude Code PreToolUse hook via: turnstile guard
 """
@@ -15,7 +21,6 @@ from pathlib import Path
 from typing import Any
 
 from turnstile_core.enforcement import EnforcementResult, check_enforcement
-from turnstile_core.loader import load_registry
 
 
 def _find_turnstile_root() -> str:
@@ -114,7 +119,7 @@ def run_guard() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Hook installation helpers (unchanged, platform-specific)
+# Hook installation helpers (platform-specific)
 # ---------------------------------------------------------------------------
 
 
@@ -298,27 +303,3 @@ def install_enforcement(
         "settings_path": str(settings_path),
         "message": f"Enforcement hook installed ({mode} mode)",
     }
-
-
-def update_registry_enforcement(project_root: Path, mode: str) -> bool:
-    """Update the enforcement field in registry.yaml.
-
-    Creates the file with minimal content if it doesn't exist.
-    Returns True if the file was updated.
-    """
-    import yaml
-
-    registry_path = project_root / ".processes" / "registry.yaml"
-
-    if registry_path.exists():
-        raw = yaml.safe_load(registry_path.read_text()) or {}
-    else:
-        registry_path.parent.mkdir(parents=True, exist_ok=True)
-        raw = {"version": "1.0"}
-
-    settings = raw.get("settings", {})
-    settings["enforcement"] = mode
-    raw["settings"] = settings
-
-    registry_path.write_text(yaml.dump(raw, default_flow_style=False, sort_keys=False))
-    return True

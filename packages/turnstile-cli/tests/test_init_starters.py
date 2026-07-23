@@ -11,7 +11,11 @@ from pathlib import Path
 import yaml
 from click.testing import CliRunner
 
-from turnstile_core.guard import TURNSTILE_REF, _guard_command_uvx, pin_repo_url
+from turnstile_cli.claude_adapter import (
+    TURNSTILE_REF,
+    _guard_command_uvx,
+    pin_repo_url,
+)
 from turnstile_cli.main import _mcp_config_uvx, cli
 from turnstile_cli.starters import STARTER_REGISTRY, STARTERS
 

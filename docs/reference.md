@@ -384,6 +384,14 @@ Turnstile can enforce process compliance by integrating with Claude Code's PreTo
 
 The hook matches the Edit and Write tools only; it does not gate the Bash tool or parse the contents of shell commands. Command-level file mutations (for example `sed -i`, `tee`, or a shell redirect) are therefore outside its scope: Turnstile does not inspect shell command text to decide whether a command mutates a file.
 
+Architecturally, enforcement is split at an adapter seam: the agnostic
+decision logic (`turnstile_core.enforcement.check_enforcement`, returning
+an `EnforcementResult` of allow/warn/deny plus reason and guidance) lives
+in core and knows nothing about any runtime, while the Claude Code
+specifics (hook JSON parsing, response shapes, `.claude/settings.json`
+installation) live in `turnstile_cli.claude_adapter`. Adapters for other
+runtimes consume the same core contract.
+
 Three modes:
 
 | Mode | Behavior |

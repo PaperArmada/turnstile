@@ -17,12 +17,12 @@ import click
 from turnstile_core.admin import generate_mermaid, simulate_dry_run
 from turnstile_core.engine import Engine
 from turnstile_core.graph import analyze as graph_analyze
-from turnstile_core.guard import (
+
+from turnstile_cli.claude_adapter import (
     _find_turnstile_root,
     install_enforcement,
     pin_repo_url,
     run_guard,
-    update_registry_enforcement,
 )
 from turnstile_core.errors import InstanceNotFoundError, ProcessNotFoundError
 from turnstile_core.hooks import generate_hook, install_hook, uninstall_hook
@@ -32,6 +32,7 @@ from turnstile_core.loader import (
     load_definition,
     load_override,
     load_registry,
+    update_registry_enforcement,
 )
 from turnstile_core.schema import export_schemas
 from turnstile_core.template import scaffold_package

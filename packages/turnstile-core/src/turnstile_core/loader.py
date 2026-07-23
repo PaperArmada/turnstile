@@ -55,6 +55,30 @@ def load_definition(path: Path) -> ProcessDefinition:
         raise DefinitionError(f"Invalid process definition in {path}: {e}") from e
 
 
+def update_registry_enforcement(project_root: Path, mode: str) -> bool:
+    """Update the enforcement field in registry.yaml.
+
+    Creates the file with minimal content if it doesn't exist.
+    Returns True if the file was updated.
+    """
+    registry_path = project_root / ".processes" / "registry.yaml"
+
+    if registry_path.exists():
+        raw = yaml.safe_load(registry_path.read_text()) or {}
+    else:
+        registry_path.parent.mkdir(parents=True, exist_ok=True)
+        raw = {"version": "1.0"}
+
+    settings = raw.get("settings", {})
+    settings["enforcement"] = mode
+    raw["settings"] = settings
+
+    registry_path.write_text(
+        yaml.dump(raw, default_flow_style=False, sort_keys=False)
+    )
+    return True
+
+
 def load_registry(project_root: Path) -> RegistryConfig:
     """Load .processes/registry.yaml, returning defaults if it doesn't exist."""
     registry_path = project_root / ".processes" / "registry.yaml"

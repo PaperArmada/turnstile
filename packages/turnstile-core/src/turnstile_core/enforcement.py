@@ -1,9 +1,13 @@
 """Agent-agnostic enforcement logic for turnstile processes.
 
 This module answers the question: "Given the current state of active
-processes, is this action permitted?" Platform-specific adapters
-(guard.py for Claude Code, git hooks, CI checks) call into this module
-and translate the result into their native response format.
+processes, is this action permitted?" It is the adapter seam: runtime
+adapters call `check_enforcement(project_root, action, file_path)` and
+translate the returned `EnforcementResult` (decision allow/warn/deny,
+reason, guidance, context) into their native response format. The
+Claude Code adapter lives in `turnstile_cli.claude_adapter`; git hooks,
+CI checks, or other runtimes plug in the same way. turnstile-core has
+no knowledge of any runtime's hook or response shapes.
 
 The enforcement check is deliberately lightweight: it reads persisted
 state and process definitions but never modifies them.
