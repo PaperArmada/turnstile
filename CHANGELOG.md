@@ -5,6 +5,27 @@ All notable changes to Turnstile are recorded here. The format follows
 adheres to [Semantic Versioning](https://semver.org/) with the pre-1.0 caveat
 described in [STABILITY.md](STABILITY.md).
 
+## [Unreleased]
+
+### Fixed
+
+- **Unwritable log.txt no longer aborts state operations** — the log is
+  fail-open at the store level; previously a read-only log file or full
+  disk could raise after an operation had already persisted, reporting
+  failure for work that landed. Instance JSON and the event stream are
+  unaffected.
+- A torn or hand-mangled instance state file now raises
+  `CorruptInstanceError` naming the exact file, across load and archive
+  listings, instead of a bare JSON error with no path.
+- `turnstile enforce` commands handle a corrupt or malformed
+  `.claude/settings.json` cleanly: an actionable error naming the file
+  (never a traceback, never an overwrite), JSON nulls in the hooks
+  structure normalized, `enforce status` degrading to
+  "hook: unknown (reason)", and settings writes made atomic. The
+  registry's enforcement mode now changes only after the hook install
+  succeeds; previously a failed install could flip the effective mode
+  and then report failure.
+
 ## [0.1.3] - 2026-07-23
 
 ### Fixed

@@ -571,6 +571,76 @@ def _run_cli(project_root: Path, *args: str) -> subprocess.CompletedProcess:
     )
 
 
+class TestSettingsShapeValidation:
+    """_load_settings validates the nested structure install walks and
+    treats JSON nulls as empty collections (8229f1c): a present-but-null
+    key must not dodge the defaulting an absent key gets, and malformed
+    nesting must fail naming the file, not as an AttributeError
+    mid-install."""
+
+    def _install_over(self, tmp_path, settings: dict) -> Path:
+        (tmp_path / ".processes").mkdir()
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        settings_path = claude_dir / "settings.json"
+        settings_path.write_text(json.dumps(settings))
+        install_enforcement(tmp_path, "monitor", turnstile_dir="/opt/turnstile")
+        return settings_path
+
+    def test_null_hooks_key_installs_like_an_absent_one(self, tmp_path):
+        settings_path = self._install_over(tmp_path, {"hooks": None})
+
+        settings = json.loads(settings_path.read_text())
+        turnstile_cmds = [
+            c for c in _pre_tool_use_commands(settings) if "turnstile guard" in c
+        ]
+        assert len(turnstile_cmds) == 1
+
+    def test_null_event_group_list_installs_like_an_absent_one(self, tmp_path):
+        settings_path = self._install_over(
+            tmp_path, {"hooks": {"PreToolUse": None}}
+        )
+
+        settings = json.loads(settings_path.read_text())
+        turnstile_cmds = [
+            c for c in _pre_tool_use_commands(settings) if "turnstile guard" in c
+        ]
+        assert len(turnstile_cmds) == 1
+
+    def test_group_with_null_hooks_list_survives_install(self, tmp_path):
+        settings_path = self._install_over(
+            tmp_path,
+            {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": None}]}},
+        )
+
+        settings = json.loads(settings_path.read_text())
+        pre_tool = settings["hooks"]["PreToolUse"]
+        # The null normalized to an empty list and the group survived.
+        assert {"matcher": "Bash", "hooks": []} in pre_tool
+        turnstile_cmds = [
+            c for c in _pre_tool_use_commands(settings) if "turnstile guard" in c
+        ]
+        assert len(turnstile_cmds) == 1
+
+    def test_non_object_group_entries_fail_naming_the_file(self, tmp_path):
+        (tmp_path / ".processes").mkdir()
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        settings_path = claude_dir / "settings.json"
+        malformed = json.dumps({"hooks": {"PreToolUse": ["x"]}}).encode()
+        settings_path.write_bytes(malformed)
+
+        with pytest.raises(ValueError) as excinfo:
+            install_enforcement(
+                tmp_path, "monitor", turnstile_dir="/opt/turnstile"
+            )
+
+        message = str(excinfo.value)
+        assert "is not a list of objects" in message
+        assert str(settings_path) in message
+        assert settings_path.read_bytes() == malformed
+
+
 class TestEnforceCliOnCorruptSettings:
     """`turnstile enforce ...` on a corrupt settings.json exits 1 with a
     readable error, never a traceback (653bc09)."""
@@ -602,6 +672,88 @@ class TestEnforceCliOnCorruptSettings:
             f"raw traceback leaked to the user:\n{result.stderr}"
         )
         assert settings_path.read_bytes() == TORN_SETTINGS
+
+
+class TestEnforceStatusOnMalformedSettings:
+    """`enforce status` is a read-only report: malformed settings degrade
+    to an honest "unknown"/"not installed" line, exit 0, no traceback
+    (8229f1c)."""
+
+    def _write_settings(self, tmp_path, content: str) -> Path:
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        settings_path = claude_dir / "settings.json"
+        settings_path.write_text(content)
+        return settings_path
+
+    def test_status_reports_not_installed_on_null_hooks(self, tmp_path):
+        self._write_settings(tmp_path, '{"hooks": null}')
+
+        result = _run_cli(tmp_path, "enforce", "status")
+
+        assert result.returncode == 0
+        assert "Claude Code hook: not installed" in result.stdout
+        assert "Traceback" not in result.stderr, (
+            f"raw traceback leaked to the user:\n{result.stderr}"
+        )
+
+    def test_status_reports_unknown_on_torn_settings(self, tmp_path):
+        self._write_settings(tmp_path, "{broken")
+
+        result = _run_cli(tmp_path, "enforce", "status")
+
+        assert result.returncode == 0
+        assert "Claude Code hook: unknown" in result.stdout
+        assert "Traceback" not in result.stderr, (
+            f"raw traceback leaked to the user:\n{result.stderr}"
+        )
+
+
+REGISTRY_MONITOR = "version: '1.0'\nsettings:\n  enforcement: monitor\n"
+
+
+def _registry_mode(root: Path) -> str:
+    data = yaml.safe_load((root / ".processes" / "registry.yaml").read_text())
+    return data["settings"]["enforcement"]
+
+
+class TestRegistryModeFlipsOnlyAfterInstall:
+    """`enforce on/monitor/off` must not flip registry.yaml's enforcement
+    mode when the hook install fails; the mode changes only after a
+    successful install (8229f1c)."""
+
+    def test_failed_enforce_on_leaves_registry_mode_unchanged(self, tmp_path):
+        (tmp_path / ".processes").mkdir()
+        (tmp_path / ".processes" / "registry.yaml").write_text(
+            REGISTRY_MONITOR
+        )
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / "settings.json").write_bytes(TORN_SETTINGS)
+
+        result = _run_cli(tmp_path, "enforce", "on")
+
+        assert result.returncode == 1
+        assert _registry_mode(tmp_path) == "monitor"
+
+    def test_successful_enforce_on_updates_registry_mode(self, tmp_path):
+        (tmp_path / ".processes").mkdir()
+        (tmp_path / ".processes" / "registry.yaml").write_text(
+            REGISTRY_MONITOR
+        )
+
+        result = _run_cli(tmp_path, "enforce", "on")
+
+        assert result.returncode == 0
+        assert _registry_mode(tmp_path) == "enforce"
+        # And the hook actually landed.
+        settings = json.loads(
+            (tmp_path / ".claude" / "settings.json").read_text()
+        )
+        turnstile_cmds = [
+            c for c in _pre_tool_use_commands(settings) if "turnstile guard" in c
+        ]
+        assert len(turnstile_cmds) == 1
 
 
 class TestRunGuard:
