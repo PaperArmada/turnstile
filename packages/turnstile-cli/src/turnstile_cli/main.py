@@ -16,6 +16,7 @@ import click
 
 from turnstile_core.admin import generate_mermaid, simulate_dry_run
 from turnstile_core.engine import Engine
+from turnstile_core.graph import analyze as graph_analyze
 from turnstile_core.guard import (
     _find_turnstile_root,
     install_enforcement,
@@ -223,15 +224,23 @@ def validate(path: str) -> None:
     """Validate a process definition YAML file."""
     try:
         defn = _load_definition_or_override(Path(path))
-        click.echo(f"Valid: {defn.name} v{defn.version}")
-        click.echo(f"  States: {', '.join(s.id for s in defn.states)}")
-        initial = defn.initial_state()
-        click.echo(f"  Initial: {initial.id}")
-        terminals = [s.id for s in defn.states if s.type.value == "terminal"]
-        click.echo(f"  Terminal: {', '.join(terminals)}")
+        analysis = graph_analyze(defn)
     except Exception as e:
         click.echo(f"Invalid: {e}", err=True)
         raise SystemExit(1)
+    if analysis.errors:
+        click.echo(f"Invalid: {defn.name} v{defn.version}", err=True)
+        for error in analysis.errors:
+            click.echo(f"  Error: {error}", err=True)
+        raise SystemExit(1)
+    click.echo(f"Valid: {defn.name} v{defn.version}")
+    click.echo(f"  States: {', '.join(s.id for s in defn.states)}")
+    initial = defn.initial_state()
+    click.echo(f"  Initial: {initial.id}")
+    terminals = [s.id for s in defn.states if s.type.value == "terminal"]
+    click.echo(f"  Terminal: {', '.join(terminals)}")
+    for warning in analysis.warnings:
+        click.echo(f"  Warning: {warning}")
 
 
 @cli.command("list")

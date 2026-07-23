@@ -33,6 +33,12 @@ described in [STABILITY.md](STABILITY.md).
   `action_failed` event to the stream (with stdout+stderr tail) and an
   `ACTION FAILED` line to log.txt. Actions still never block the state
   change. Previously every action failure was silently swallowed. (#31)
+- **Static graph analysis at validate time** — `turnstile validate` and
+  `process_validate_definition` now warn about unreachable states and
+  dead-end sinks (states with no path to any terminal), and a dispatch
+  state's `immediate` target is checked at load time instead of failing
+  mid-process. The graph walk lives in `turnstile_core.graph` with a
+  reusable API (edge map, reachability, terminal-reachability). (#30)
 
 ### Fixed
 

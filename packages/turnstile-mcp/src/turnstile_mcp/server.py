@@ -305,8 +305,10 @@ async def process_history(instance_id: str) -> list[dict[str, Any]]:
 async def process_validate_definition(path: str) -> dict[str, Any]:
     """Validate a process definition YAML file against the schema.
 
-    Checks valid YAML, valid schema, all transitions reference real
-    states, initial/terminal states exist, etc.
+    Checks valid YAML, valid schema, all transitions/routing/dispatch
+    targets reference real states, initial/terminal states exist, and
+    runs a static graph pass: unreachable states and dead-end sinks
+    (states with no path to any terminal) come back as warnings.
 
     Args:
         path: Path to the YAML process definition file.

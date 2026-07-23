@@ -62,6 +62,7 @@ from turnstile_core.loader import (
     load_definition,
     load_registry,
 )
+from turnstile_core.graph import analyze as graph_analyze
 from turnstile_core.models import ProcessDefinition, ProcessState, StateType
 from turnstile_core.persistence import (
     HistoryEntry,
@@ -1816,16 +1817,24 @@ class Engine:
         return compute_analytics(self._store)
 
     def validate_definition(self, path: str) -> dict[str, Any]:
-        """Validate a process definition file."""
+        """Validate a process definition file.
+
+        Schema/reference problems fail the load and come back as errors.
+        A loadable definition additionally gets the static graph pass:
+        unreachable states and dead-end sinks (states with no path to any
+        terminal) are surfaced as warnings, since they load fine but fail
+        or mislead at runtime.
+        """
         try:
             defn = load_definition(Path(path))
+            analysis = graph_analyze(defn)
             return {
-                "valid": True,
+                "valid": not analysis.errors,
                 "name": defn.name,
                 "version": defn.version,
                 "states": [s.id for s in defn.states],
-                "errors": [],
-                "warnings": [],
+                "errors": analysis.errors,
+                "warnings": analysis.warnings,
             }
         except Exception as e:
             return {

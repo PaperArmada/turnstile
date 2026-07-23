@@ -405,6 +405,16 @@ class ProcessDefinition(BaseModel):
                             f"references unknown state '{target}'"
                         )
 
+        # Dispatch immediate targets must reference existing states.
+        # Previously only checked at runtime inside engine.transition, so a
+        # typo shipped green and failed mid-process.
+        for state in self.states:
+            if state.immediate is not None and state.immediate not in state_ids:
+                raise ValueError(
+                    f"Dispatch state '{state.id}' immediate target "
+                    f"'{state.immediate}' references unknown state"
+                )
+
         # Terminal states must not have transitions
         for state in self.states:
             if state.type == StateType.terminal and state.transitions:

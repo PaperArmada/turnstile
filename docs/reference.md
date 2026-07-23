@@ -164,7 +164,10 @@ states:
 ## CLI
 
 ```bash
-# Validate a process definition
+# Validate a process definition. Beyond schema and reference checks
+# (which include dispatch `immediate` targets), a static graph pass
+# warns about states that are unreachable from the initial state and
+# dead-end sinks that cannot reach any terminal.
 turnstile validate .processes/feature-deploy.yaml
 
 # List available processes
