@@ -20,6 +20,7 @@ from turnstile_core.graph import analyze as graph_analyze
 
 from turnstile_cli.claude_adapter import (
     _find_turnstile_root,
+    _load_settings,
     install_enforcement,
     pin_repo_url,
     run_guard,
@@ -1516,18 +1517,16 @@ def enforce_status(ctx: click.Context) -> None:
     settings_path = root / ".claude" / "settings.json"
     if settings_path.exists():
         try:
-            settings = json.loads(settings_path.read_text())
-            if not isinstance(settings, dict):
-                raise ValueError("top-level value is not an object")
-        except (OSError, ValueError) as e:
-            click.echo(f"Claude Code hook: unknown ({settings_path}: {e})")
+            settings = _load_settings(settings_path)
+            pre_tool = (settings.get("hooks") or {}).get("PreToolUse", [])
+            has_hook = any(
+                "turnstile guard" in hk.get("command", "")
+                for entry in pre_tool
+                for hk in (entry.get("hooks") or [])
+            )
+        except ValueError as e:
+            click.echo(f"Claude Code hook: unknown ({e})")
             return
-        pre_tool = settings.get("hooks", {}).get("PreToolUse", [])
-        has_hook = any(
-            "turnstile guard" in hk.get("command", "")
-            for entry in pre_tool
-            for hk in entry.get("hooks", [])
-        )
         if has_hook:
             click.echo("Claude Code hook: installed")
         else:
@@ -1544,7 +1543,6 @@ def enforce_status(ctx: click.Context) -> None:
 def enforce_on(ctx: click.Context, dev: bool, turnstile_dir: str | None, repo: str | None) -> None:
     """Enable enforcement (blocks file mutations without an active process)."""
     root = Path(ctx.obj["project"]) if ctx.obj.get("project") else Path.cwd()
-    update_registry_enforcement(root, "enforce")
     if dev:
         result = _install_enforcement_or_exit(
             root, "enforce", turnstile_dir=turnstile_dir or _find_turnstile_root()
@@ -1553,6 +1551,9 @@ def enforce_on(ctx: click.Context, dev: bool, turnstile_dir: str | None, repo: s
         result = _install_enforcement_or_exit(
             root, "enforce", repo_url=repo or TURNSTILE_REPO_URL
         )
+    # Registry mode flips only after the hook install succeeded; the
+    # reverse order could flip the mode and then report failure.
+    update_registry_enforcement(root, "enforce")
     click.echo(f"Enforcement enabled: {result['message']}")
     click.echo(f"  Settings: {result.get('settings_path', 'N/A')}")
 
@@ -1565,7 +1566,6 @@ def enforce_on(ctx: click.Context, dev: bool, turnstile_dir: str | None, repo: s
 def enforce_monitor(ctx: click.Context, dev: bool, turnstile_dir: str | None, repo: str | None) -> None:
     """Enable monitor mode (warns but allows mutations without a process)."""
     root = Path(ctx.obj["project"]) if ctx.obj.get("project") else Path.cwd()
-    update_registry_enforcement(root, "monitor")
     if dev:
         result = _install_enforcement_or_exit(
             root, "monitor", turnstile_dir=turnstile_dir or _find_turnstile_root()
@@ -1574,6 +1574,7 @@ def enforce_monitor(ctx: click.Context, dev: bool, turnstile_dir: str | None, re
         result = _install_enforcement_or_exit(
             root, "monitor", repo_url=repo or TURNSTILE_REPO_URL
         )
+    update_registry_enforcement(root, "monitor")
     click.echo(f"Monitor mode enabled: {result['message']}")
     click.echo(f"  Settings: {result.get('settings_path', 'N/A')}")
 
@@ -1583,8 +1584,8 @@ def enforce_monitor(ctx: click.Context, dev: bool, turnstile_dir: str | None, re
 def enforce_off(ctx: click.Context) -> None:
     """Disable enforcement and remove the Claude Code hook."""
     root = Path(ctx.obj["project"]) if ctx.obj.get("project") else Path.cwd()
-    update_registry_enforcement(root, "off")
     result = _install_enforcement_or_exit(root, "off")
+    update_registry_enforcement(root, "off")
     click.echo(f"Enforcement disabled: {result['message']}")
 
 

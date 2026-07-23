@@ -35,6 +35,37 @@ def _load_settings(settings_path: Path) -> dict[str, Any]:
         settings = json.loads(settings_path.read_text())
         if not isinstance(settings, dict):
             raise ValueError("top-level value is not an object")
+        # Validate (and normalize nulls in) the structure this module
+        # later walks, so malformed nesting fails here with the file
+        # named instead of surfacing as an AttributeError mid-install.
+        # A JSON null is treated as the empty collection: the key being
+        # present-but-null must not dodge the defaulting that an absent
+        # key gets.
+        if settings.get("hooks") is None:
+            if "hooks" in settings:
+                settings["hooks"] = {}
+        elif not isinstance(settings["hooks"], dict):
+            raise ValueError("'hooks' is not an object")
+        for event, groups in settings.get("hooks", {}).items():
+            if groups is None:
+                settings["hooks"][event] = []
+                continue
+            if not isinstance(groups, list) or not all(
+                isinstance(g, dict) for g in groups
+            ):
+                raise ValueError(f"'hooks.{event}' is not a list of objects")
+            for group in groups:
+                group_hooks = group.get("hooks")
+                if group_hooks is None:
+                    if "hooks" in group:
+                        group["hooks"] = []
+                elif not isinstance(group_hooks, list) or not all(
+                    isinstance(h, dict) for h in group_hooks
+                ):
+                    raise ValueError(
+                        f"a 'hooks.{event}' group has a malformed "
+                        f"'hooks' list"
+                    )
         return settings
     except (OSError, ValueError) as e:
         raise ValueError(
