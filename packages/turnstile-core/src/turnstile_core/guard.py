@@ -191,6 +191,28 @@ def generate_hook_config(
     }
 
 
+def _strip_turnstile_hooks(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove turnstile guard hook entries from PreToolUse groups.
+
+    Filters at the individual hook level so non-turnstile hooks sharing a
+    group with the turnstile guard are preserved. A group is dropped only
+    when the removal leaves it with no hooks; untouched groups pass through
+    unchanged.
+    """
+    stripped = []
+    for group in groups:
+        group_hooks = group.get("hooks", [])
+        remaining = [
+            hk for hk in group_hooks
+            if "turnstile guard" not in hk.get("command", "")
+        ]
+        if len(remaining) == len(group_hooks):
+            stripped.append(group)
+        elif remaining:
+            stripped.append({**group, "hooks": remaining})
+    return stripped
+
+
 def install_enforcement(
     project_root: Path,
     mode: str,
@@ -225,14 +247,8 @@ def install_enforcement(
             settings = json.loads(settings_path.read_text())
             hooks = settings.get("hooks", {})
             pre_tool = hooks.get("PreToolUse", [])
-            # Remove turnstile entries
-            pre_tool = [
-                h for h in pre_tool
-                if not any(
-                    "turnstile guard" in hk.get("command", "")
-                    for hk in h.get("hooks", [])
-                )
-            ]
+            # Remove turnstile entries, preserving co-grouped hooks
+            pre_tool = _strip_turnstile_hooks(pre_tool)
             if pre_tool:
                 hooks["PreToolUse"] = pre_tool
             else:
@@ -265,14 +281,8 @@ def install_enforcement(
     existing_hooks = settings.get("hooks", {})
     existing_pre_tool = existing_hooks.get("PreToolUse", [])
 
-    # Remove old turnstile entries
-    existing_pre_tool = [
-        h for h in existing_pre_tool
-        if not any(
-            "turnstile guard" in hk.get("command", "")
-            for hk in h.get("hooks", [])
-        )
-    ]
+    # Remove old turnstile entries, preserving co-grouped hooks
+    existing_pre_tool = _strip_turnstile_hooks(existing_pre_tool)
 
     # Add new turnstile entry
     existing_pre_tool.extend(hook_config["hooks"]["PreToolUse"])

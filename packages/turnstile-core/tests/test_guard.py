@@ -609,6 +609,231 @@ class TestInstallEnforcement:
         assert "github.com/org/repo.git" in cmd
 
 
+CUSTOM_HOOK_COMMAND = "python /opt/hooks/lint_check.py"
+
+
+def _pre_tool_use_commands(settings):
+    """Flatten all PreToolUse hook commands across groups."""
+    return [
+        hk.get("command", "")
+        for group in settings.get("hooks", {}).get("PreToolUse", [])
+        for hk in group.get("hooks", [])
+    ]
+
+
+class TestSharedGroupHookPreservation:
+    """Regression tests for GH #39: install/off merge drops non-turnstile
+    hooks that share a PreToolUse group with the turnstile guard hook.
+
+    Contract: filtering happens at the hook level within each group. Only
+    hook entries whose command contains "turnstile guard" are removed;
+    sibling hooks in the same group survive; a group is dropped only when
+    its hooks list becomes empty; unrelated groups are untouched.
+    """
+
+    def _write_shared_group_settings(self, tmp_path):
+        """Settings where a custom hook shares a group with turnstile guard."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        settings = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Edit|Write",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": (
+                                    "uv --directory /old/turnstile "
+                                    "run --package turnstile-cli "
+                                    "turnstile guard"
+                                ),
+                            },
+                            {"type": "command", "command": CUSTOM_HOOK_COMMAND},
+                        ],
+                    }
+                ]
+            }
+        }
+        (claude_dir / "settings.json").write_text(json.dumps(settings))
+        return claude_dir / "settings.json"
+
+    @pytest.mark.parametrize("mode", ["monitor", "enforce"])
+    def test_install_preserves_custom_hook_sharing_group_with_turnstile(
+        self, tmp_path, mode
+    ):
+        """Reinstalling over a shared group keeps the sibling custom hook
+        and replaces the turnstile entry rather than dropping the group."""
+        (tmp_path / ".processes").mkdir()
+        settings_path = self._write_shared_group_settings(tmp_path)
+
+        install_enforcement(tmp_path, mode, turnstile_dir="/new/turnstile")
+
+        settings = json.loads(settings_path.read_text())
+        commands = _pre_tool_use_commands(settings)
+        assert CUSTOM_HOOK_COMMAND in commands, (
+            "custom hook sharing a group with turnstile guard was lost"
+        )
+        turnstile_cmds = [c for c in commands if "turnstile guard" in c]
+        assert len(turnstile_cmds) == 1
+        assert "/new/turnstile" in turnstile_cmds[0]
+
+    def test_off_preserves_custom_hook_sharing_group_with_turnstile(
+        self, tmp_path
+    ):
+        """Turning enforcement off removes only the turnstile hook entry;
+        the sibling custom hook stays in its group with its matcher."""
+        (tmp_path / ".processes").mkdir()
+        settings_path = self._write_shared_group_settings(tmp_path)
+
+        install_enforcement(tmp_path, "off")
+
+        settings = json.loads(settings_path.read_text())
+        commands = _pre_tool_use_commands(settings)
+        assert CUSTOM_HOOK_COMMAND in commands, (
+            "custom hook sharing a group with turnstile guard was lost"
+        )
+        assert not any("turnstile guard" in c for c in commands)
+        surviving_group = settings["hooks"]["PreToolUse"][0]
+        assert surviving_group["matcher"] == "Edit|Write"
+
+    def test_off_removes_group_when_turnstile_is_only_hook(self, tmp_path):
+        """Guard-rail (passes pre-fix): a group left empty after removing
+        the turnstile hook is dropped, and the PreToolUse key with it,
+        while unrelated hook events are untouched."""
+        (tmp_path / ".processes").mkdir()
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        settings = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Edit|Write",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": (
+                                    "uv --directory /old/turnstile "
+                                    "run --package turnstile-cli "
+                                    "turnstile guard"
+                                ),
+                            }
+                        ],
+                    }
+                ],
+                "PostToolUse": [
+                    {
+                        "matcher": ".*",
+                        "hooks": [
+                            {"type": "command", "command": CUSTOM_HOOK_COMMAND}
+                        ],
+                    }
+                ],
+            }
+        }
+        (claude_dir / "settings.json").write_text(json.dumps(settings))
+
+        install_enforcement(tmp_path, "off")
+
+        settings = json.loads((claude_dir / "settings.json").read_text())
+        assert "PreToolUse" not in settings.get("hooks", {})
+        assert len(settings["hooks"]["PostToolUse"]) == 1
+
+    def test_install_preserves_custom_hook_in_separate_group(self, tmp_path):
+        """Guard-rail (passes pre-fix): a custom hook in its own group is
+        untouched by install, which adds the turnstile group alongside it."""
+        (tmp_path / ".processes").mkdir()
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        settings = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [
+                            {"type": "command", "command": CUSTOM_HOOK_COMMAND}
+                        ],
+                    }
+                ]
+            }
+        }
+        (claude_dir / "settings.json").write_text(json.dumps(settings))
+
+        install_enforcement(tmp_path, "monitor", turnstile_dir="/new/turnstile")
+
+        settings = json.loads((claude_dir / "settings.json").read_text())
+        commands = _pre_tool_use_commands(settings)
+        assert CUSTOM_HOOK_COMMAND in commands
+        turnstile_cmds = [c for c in commands if "turnstile guard" in c]
+        assert len(turnstile_cmds) == 1
+        bash_groups = [
+            g for g in settings["hooks"]["PreToolUse"] if g["matcher"] == "Bash"
+        ]
+        assert len(bash_groups) == 1
+        assert bash_groups[0]["hooks"] == [
+            {"type": "command", "command": CUSTOM_HOOK_COMMAND}
+        ]
+
+    def test_install_passes_through_group_without_hooks_key(self, tmp_path):
+        """A PreToolUse group lacking a "hooks" key entirely is passed
+        through install unchanged, with the turnstile group added beside it."""
+        (tmp_path / ".processes").mkdir()
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        hookless_group = {"matcher": "Bash"}
+        settings = {"hooks": {"PreToolUse": [hookless_group]}}
+        (claude_dir / "settings.json").write_text(json.dumps(settings))
+
+        install_enforcement(tmp_path, "monitor", turnstile_dir="/new/turnstile")
+
+        settings = json.loads((claude_dir / "settings.json").read_text())
+        pre_tool = settings["hooks"]["PreToolUse"]
+        assert hookless_group in pre_tool
+        turnstile_cmds = [
+            c for c in _pre_tool_use_commands(settings) if "turnstile guard" in c
+        ]
+        assert len(turnstile_cmds) == 1
+
+    def test_install_passes_through_group_with_empty_hooks_list(self, tmp_path):
+        """A PreToolUse group whose "hooks" list is empty is passed through
+        install unchanged, not mistaken for an emptied turnstile group."""
+        (tmp_path / ".processes").mkdir()
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        empty_group = {"matcher": "Bash", "hooks": []}
+        settings = {"hooks": {"PreToolUse": [empty_group]}}
+        (claude_dir / "settings.json").write_text(json.dumps(settings))
+
+        install_enforcement(tmp_path, "monitor", turnstile_dir="/new/turnstile")
+
+        settings = json.loads((claude_dir / "settings.json").read_text())
+        pre_tool = settings["hooks"]["PreToolUse"]
+        assert empty_group in pre_tool
+        turnstile_cmds = [
+            c for c in _pre_tool_use_commands(settings) if "turnstile guard" in c
+        ]
+        assert len(turnstile_cmds) == 1
+
+    def test_reinstall_over_shared_group_is_idempotent(self, tmp_path):
+        """Running install twice with identical arguments over a shared
+        group yields byte-identical settings.json with one turnstile entry."""
+        (tmp_path / ".processes").mkdir()
+        settings_path = self._write_shared_group_settings(tmp_path)
+
+        install_enforcement(tmp_path, "monitor", turnstile_dir="/new/turnstile")
+        after_first = settings_path.read_bytes()
+
+        install_enforcement(tmp_path, "monitor", turnstile_dir="/new/turnstile")
+        after_second = settings_path.read_bytes()
+
+        assert after_second == after_first
+        settings = json.loads(after_second)
+        commands = _pre_tool_use_commands(settings)
+        assert CUSTOM_HOOK_COMMAND in commands
+        turnstile_cmds = [c for c in commands if "turnstile guard" in c]
+        assert len(turnstile_cmds) == 1
+
+
 class TestUpdateRegistryEnforcement:
     def test_creates_registry_if_missing(self, tmp_path):
         proc_dir = tmp_path / ".processes"
