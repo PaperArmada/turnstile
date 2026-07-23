@@ -44,7 +44,7 @@ states:
           message: "CLI commands"
           severity: info
 
-        - command: "uv run --package turnstile-core pytest packages/turnstile-core/tests/ -q --no-header 2>&1 | tail -1"
+        - command: "uv run --group dev python -m pytest packages/turnstile-core/tests/ packages/turnstile-cli/tests/ -q --no-header 2>&1 | tail -1"
           expect: contains("passed")
           message: "Test suite status"
           severity: info
@@ -65,15 +65,21 @@ states:
     transitions: [done, update]
     on_enter:
       validate:
-        # Render don't record: compare source of truth (code) against
-        # README rather than asking the agent to self-certify.
-        - command: "grep -oP 'async def \\K(process_\\w+)' packages/turnstile-mcp/src/turnstile_mcp/server.py | while read tool; do grep -q \"$tool\" README.md || echo \"$tool\"; done"
+        # Render don't record: compare source of truth (code) against the
+        # docs rather than asking the agent to self-certify. The README is
+        # deliberately a summary; the full surface lives in
+        # docs/reference.md, so completeness is checked there.
+        - command: "grep -oP 'async def \\K(process_\\w+)' packages/turnstile-mcp/src/turnstile_mcp/server.py | while read tool; do grep -q \"$tool\" docs/reference.md || echo \"$tool\"; done"
           expect: empty
-          message: "All MCP tools must be mentioned in README"
+          message: "All MCP tools must be documented in docs/reference.md"
 
-        - command: "for cmd in validate list status graph dry-run schema check-completed analytics init-package; do grep -q \"turnstile $cmd\" README.md || echo \"$cmd\"; done"
+        - command: "for cmd in validate list status graph dry-run schema check-completed analytics init-package; do grep -q \"turnstile $cmd\" docs/reference.md || echo \"$cmd\"; done"
           expect: empty
-          message: "All CLI commands must appear in README"
+          message: "All CLI commands must be documented in docs/reference.md"
+
+        - command: "grep -q 'docs/reference.md' README.md && echo linked || echo missing"
+          expect: equals("linked")
+          message: "README must link to the full reference"
 
         - command: "grep -c '^## ' README.md"
           expect: greater_than(5)

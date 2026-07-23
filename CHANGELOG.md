@@ -7,6 +7,41 @@ described in [STABILITY.md](STABILITY.md).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-23
+
+### Fixed
+
+- `turnstile init` registers process definitions already present in
+  `.processes/` (previously they were silently unstartable: a non-empty
+  `registry.local` disables auto-discovery). Override files are registered
+  when their `extends` target resolves; unparseable files and overrides with
+  missing parents are reported and skipped instead of registered. Stems are
+  YAML-quoted so unusual filenames cannot corrupt the registry. (#40)
+- `turnstile init --enforce off` no longer writes a registry that fails to
+  parse (a bare `off` was read as YAML boolean `False`). (#40)
+- `dry-run`, `graph`, and `info` fail with a one-line error instead of a
+  traceback for unresolvable process names, including a registration hint
+  when the file exists unregistered and a pointer to the internal `name:`
+  field when it differs from the filename. (#40)
+- Re-running `turnstile init` (or switching enforcement modes) no longer
+  removes non-turnstile hooks that share a PreToolUse group in
+  `.claude/settings.json`; the merge filters individual hook entries instead
+  of whole groups. Hooks lost to earlier merges must be re-added manually.
+  (#39)
+- State writes are atomic (same-directory temp file, fsync, rename): a crash
+  or failed write can no longer leave a truncated state file; the previous
+  good file survives. Instance-ID lookups match the exact ID instead of a
+  substring, and an empty-string lookup raises instead of returning an
+  arbitrary instance. (#28)
+
+### Changed
+
+- Instance IDs widened from 6 to 12 hex characters; state files with old
+  short IDs still load. (#28)
+- Quickstart rewritten around the verified cold-install path: install first,
+  explicit registration step, enforcement heads-up, a CLI alias tip, and
+  copy-paste prompts for delegating setup to an agent.
+
 ## [0.1.0] - 2026-07-21
 
 Initial public release.

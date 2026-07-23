@@ -15,7 +15,7 @@ A CLI complements the MCP surface for validation, CI integration, and administra
 
 ![Turnstile demo: peer-review with role handoffs and an illegal-transition rejection](docs/assets/demo.gif)
 
-Run it locally:
+Run it locally (from a clone of this repo):
 
 ```bash
 uv run --package turnstile-core python scripts/demo.py
@@ -36,12 +36,12 @@ Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 In your project directory:
 
 ```bash
-uvx --python 3.12 --from "turnstile-cli @ git+https://github.com/PaperArmada/turnstile.git@v0.1.0#subdirectory=packages/turnstile-cli" turnstile init
+uvx --python 3.12 --from "turnstile-cli @ git+https://github.com/PaperArmada/turnstile.git@v0.1.1#subdirectory=packages/turnstile-cli" turnstile init
 ```
 
-This generates the MCP server config, registry, Claude Code guard hook, and gitignore entries. Restart Claude Code and the process tools are available.
+This generates the MCP server config, registry, Claude Code guard hook, and gitignore entries; process definitions already in `.processes/` are registered automatically. Enforcement starts in monitor mode (warnings only; `turnstile enforce off` disables it). Restart Claude Code and the process tools are available.
 
-The generated config pins to a release tag (`@v0.1.0`), so installs are reproducible. To upgrade, bump the tag in `.mcp.json` and `.claude/settings.json` and run `uvx --refresh`, then refresh the starter definitions with `turnstile update --apply`.
+The generated config pins to a release tag (`@v0.1.1`), so installs are reproducible. To upgrade, bump the tag in `.mcp.json` and `.claude/settings.json` and run `uvx --refresh`, then refresh the starter definitions with `turnstile update --apply`.
 
 For the full walkthrough (writing a process, driving it from an agent, and skipping a state), see [docs/quickstart.md](docs/quickstart.md).
 
@@ -96,7 +96,7 @@ scripts/
 ## Running tests
 
 ```bash
-uv run --package turnstile-core pytest packages/turnstile-core/tests/ -v
+uv run --group dev python -m pytest packages/turnstile-core/tests/ packages/turnstile-cli/tests/
 ```
 
 ## Contributing

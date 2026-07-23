@@ -1,6 +1,6 @@
 [project]
 name = "turnstile-workspace"
-version = "0.1.0"
+version = "0.1.1"
 description = "Process engine for AI agents"
 requires-python = ">=3.12"
 
