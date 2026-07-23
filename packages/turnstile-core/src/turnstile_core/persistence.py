@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -85,7 +87,55 @@ def _now_iso() -> str:
 
 
 def _generate_id() -> str:
-    return uuid.uuid4().hex[:6]
+    return uuid.uuid4().hex[:12]
+
+
+def _matches_id(path: Path, instance_id: str) -> bool:
+    """True if ``path`` is the state file for ``instance_id``.
+
+    Filenames are ``{process_name}-{instance_id}.json``, so require the ID as
+    the exact final ``-``-delimited component. A substring test would let an
+    ID that happens to appear inside a process name or a longer ID resolve to
+    the wrong instance.
+
+    Strictly this is "preceded by a dash": a queried ID containing ``-`` can
+    match across the name/ID boundary (e.g. querying ``abc-123`` matches
+    process ``proc-abc`` id ``123``). Generated IDs are pure hex, so this is
+    unreachable through ``create()``; it also means a full ``name-id`` token
+    pasted from a log resolves, which is acceptable.
+    """
+    return path.suffix == ".json" and path.stem.endswith(f"-{instance_id}")
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` atomically via a same-directory temp file.
+
+    ``os.replace`` is atomic on POSIX and Windows, so readers see either the
+    old content or the new content, never a truncated file. The temp file uses
+    a ``.tmp`` suffix so it can never match the ``*.json`` globs that
+    enumerate instances.
+    """
+    fd, tmp_name = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        # mkstemp creates the file 0600; restore the umask-derived mode a
+        # plain write would have produced, so permissions don't depend on
+        # which code path last wrote the file.
+        umask = os.umask(0)
+        os.umask(umask)
+        os.chmod(tmp_name, 0o666 & ~umask)
+        os.replace(tmp_name, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 class StateStore:
@@ -142,7 +192,7 @@ class StateStore:
     def load(self, instance_id: str) -> ProcessInstance:
         """Load an active instance by ID. Raises InstanceNotFoundError."""
         for path in self.active_dir.iterdir():
-            if path.suffix == ".json" and instance_id in path.stem:
+            if _matches_id(path, instance_id):
                 data = json.loads(path.read_text())
                 return ProcessInstance(**data)
 
@@ -152,7 +202,7 @@ class StateStore:
             ("abandoned", self.abandoned_dir),
         ):
             for path in archive_dir.rglob("*.json"):
-                if instance_id in path.stem:
+                if _matches_id(path, instance_id):
                     raise InstanceNotFoundError(
                         f"Instance '{instance_id}' is {label} (not active)"
                     )
@@ -167,14 +217,14 @@ class StateStore:
         """
         # Try active first
         for path in self.active_dir.iterdir():
-            if path.suffix == ".json" and instance_id in path.stem:
+            if _matches_id(path, instance_id):
                 data = json.loads(path.read_text())
                 return ProcessInstance(**data)
 
         # Search archived directories (organized by month)
         for archive_dir in (self.completed_dir, self.abandoned_dir):
             for path in archive_dir.rglob("*.json"):
-                if instance_id in path.stem:
+                if _matches_id(path, instance_id):
                     data = json.loads(path.read_text())
                     return ProcessInstance(**data)
 
@@ -230,8 +280,8 @@ class StateStore:
         dst = month_dir / src.name
 
         # Write updated data to destination, then remove source
-        dst.write_text(
-            instance.model_dump_json(indent=2, by_alias=True)
+        _atomic_write_text(
+            dst, instance.model_dump_json(indent=2, by_alias=True)
         )
         if src.exists():
             src.unlink()
@@ -251,8 +301,8 @@ class StateStore:
         src = self._active_path(instance.process_name, instance.instance_id)
         dst = month_dir / src.name
 
-        dst.write_text(
-            instance.model_dump_json(indent=2, by_alias=True)
+        _atomic_write_text(
+            dst, instance.model_dump_json(indent=2, by_alias=True)
         )
         if src.exists():
             src.unlink()
@@ -285,4 +335,6 @@ class StateStore:
 
     def _write(self, instance: ProcessInstance) -> None:
         path = self._active_path(instance.process_name, instance.instance_id)
-        path.write_text(instance.model_dump_json(indent=2, by_alias=True))
+        _atomic_write_text(
+            path, instance.model_dump_json(indent=2, by_alias=True)
+        )
