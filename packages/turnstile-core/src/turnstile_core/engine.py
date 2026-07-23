@@ -587,6 +587,296 @@ class Engine:
                 )
         return emitted
 
+    async def _enter_state(
+        self,
+        instance: ProcessInstance,
+        defn: ProcessDefinition,
+        target: ProcessState | None,
+        history_entry: HistoryEntry,
+        all_results: list[ValidationResult],
+        validation_params: dict[str, str],
+        session_id: str = "",
+        *,
+        signal_name: str | None = None,
+        signal_data: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> TransitionResult:
+        """Commit entry into ``history_entry.to_state``.
+
+        The one canonical state-entry path, shared by transition() and
+        receive_signal(): owns the instance mutation (current_state +
+        history), on_enter actions, the per-state-type branch (dispatch /
+        wait / subprocess / terminal / normal), event emission, logging,
+        persistence, and result assembly.
+
+        ``signal_name`` switches the path into signal semantics: events use
+        the ``signal_received`` type carrying the signal and its data, log
+        lines use the SIGNAL style, and dispatch parameter forwarding draws
+        from the signal data instead of the transition metadata. Preserving
+        pre-refactor behavior, the signal path also does NOT handle wait or
+        subprocess targets specially and does NOT resume a suspended parent
+        or fire on_complete when entering a terminal state; those
+        asymmetries are tracked upstream rather than silently changed here.
+        ``target`` may be None only on the signal path (a transitions list
+        naming a state missing from the definition), which degrades to the
+        plain-entry branch exactly as before the extraction.
+        """
+        target_state = history_entry.to_state
+        via_signal = signal_name is not None
+
+        instance.current_state = target_state
+        instance.history.append(history_entry)
+
+        if target is not None:
+            await self._run_actions(
+                target, "on_enter", instance, validation_params, session_id
+            )
+
+        base_event_type = "signal_received" if via_signal else "transition"
+
+        def base_payload(entry: HistoryEntry) -> dict[str, Any]:
+            payload = self._entry_payload(entry)
+            if via_signal:
+                payload["signal"] = signal_name
+                payload["data"] = signal_data
+            return payload
+
+        # Dispatch: create the child, then continue to the immediate target
+        if target is not None and target.type == StateType.dispatch:
+            extra_src: dict[str, Any] = (
+                (signal_data or {}) if via_signal else (metadata or {})
+            )
+            extra_params = {
+                k: str(v) for k, v in extra_src.items()
+                if isinstance(v, (str, int, float, bool))
+            }
+            child_result = self._dispatch_child(
+                instance, target, extra_params=extra_params
+            )
+            immediate_state = defn.get_state(target.immediate)
+            if immediate_state is None and not via_signal:
+                raise TransitionError(
+                    f"Dispatch immediate target '{target.immediate}' "
+                    f"not found in definition"
+                )
+
+            auto_entry = HistoryEntry(**{
+                "from": target_state,
+                "to": target.immediate,
+                "at": _now_iso(),
+                "triggered_by": f"dispatch: {target.process}",
+                "role": immediate_state.role if immediate_state else "",
+                "session_id": session_id,
+                "metadata": {
+                    "dispatched_instance": child_result["instance_id"],
+                    "dispatched_process": child_result["process_name"],
+                },
+            })
+            instance.current_state = target.immediate
+            instance.history.append(auto_entry)
+            self._emit(
+                base_event_type,
+                instance,
+                base_payload(history_entry),
+                session_id=session_id,
+            )
+            self._emit(
+                "dispatch",
+                instance,
+                {
+                    **self._entry_payload(auto_entry),
+                    "child_instance_id": child_result["instance_id"],
+                    "child_process": child_result["process_name"],
+                },
+                session_id=session_id,
+            )
+            self._store.save(instance)
+
+            if via_signal:
+                self._store.append_log(
+                    f"SIGNAL {instance.process_name}-{instance.instance_id}: "
+                    f"received '{signal_name}', dispatched "
+                    f"{child_result['process_name']}-"
+                    f"{child_result['instance_id']}, "
+                    f"continued to {target.immediate}"
+                )
+            else:
+                self._store.append_log(
+                    f"DISPATCH {instance.process_name}-{instance.instance_id}: "
+                    f"created {child_result['process_name']}-"
+                    f"{child_result['instance_id']}, "
+                    f"continued to {target.immediate}"
+                )
+
+            return TransitionResult(
+                success=True,
+                new_state=target.immediate,
+                validation_results=[_vr_to_dict(r) for r in all_results],
+                available_transitions=(
+                    immediate_state.transitions if immediate_state else []
+                ),
+                role=immediate_state.role if immediate_state else "",
+                agent_context=(
+                    immediate_state.agent_context.model_dump()
+                    if immediate_state and immediate_state.agent_context
+                    else None
+                ),
+                message=(
+                    f"Dispatched '{target.process}' as instance "
+                    f"{child_result['instance_id']}, "
+                    f"continued to '{target.immediate}'"
+                ),
+                subprocess_started=child_result["instance_id"],
+            )
+
+        # Wait: mark the instance waiting (ordinary transitions only)
+        if not via_signal and target is not None and target.type == StateType.wait:
+            instance.waiting = True
+            self._emit(
+                "transition",
+                instance,
+                {
+                    **self._entry_payload(history_entry),
+                    "waiting": True,
+                    "signal": target.signal.name,
+                },
+                session_id=session_id,
+            )
+            self._store.save(instance)
+
+            self._store.append_log(
+                f"TRANSITION {instance.process_name}-{instance.instance_id}: "
+                f"{history_entry.from_state} -> {target_state} (waiting for signal "
+                f"'{target.signal.name}')"
+            )
+
+            return TransitionResult(
+                success=True,
+                new_state=target_state,
+                validation_results=[_vr_to_dict(r) for r in all_results],
+                available_transitions=[],
+                role=target.role,
+                agent_context=target.agent_context.model_dump() if target.agent_context else None,
+                message=f"Waiting for signal '{target.signal.name}'",
+            )
+
+        # Subprocess: start the child and suspend (ordinary transitions only)
+        if not via_signal and target is not None and target.type == StateType.subprocess:
+            child_result = self._start_subprocess(instance, target)
+            self._emit(
+                "transition",
+                instance,
+                self._entry_payload(history_entry),
+                session_id=session_id,
+            )
+            self._emit(
+                "subprocess_started",
+                instance,
+                {
+                    "child_instance_id": child_result["instance_id"],
+                    "child_process": child_result["process_name"],
+                    "suspended": True,
+                },
+                session_id=session_id,
+            )
+            self._store.save(instance)
+
+            self._store.append_log(
+                f"TRANSITION {instance.process_name}-{instance.instance_id}: "
+                f"{history_entry.from_state} -> {target_state} "
+                f"(subprocess {child_result['instance_id']} started)"
+            )
+
+            return TransitionResult(
+                success=True,
+                new_state=target_state,
+                validation_results=[_vr_to_dict(r) for r in all_results],
+                available_transitions=[],
+                message=f"Subprocess '{target.process}' started",
+                subprocess_started=child_result["instance_id"],
+            )
+
+        # Terminal and plain states share the log/result tail below
+        parent_info = None
+        if target is not None and target.type == StateType.terminal:
+            self._emit(
+                base_event_type,
+                instance,
+                base_payload(history_entry),
+                session_id=session_id,
+            )
+            complete_payload: dict[str, Any] = {"final_state": target_state}
+            if via_signal:
+                complete_payload["via"] = "signal"
+            self._emit(
+                "complete",
+                instance,
+                complete_payload,
+                session_id=session_id,
+            )
+            self._store.complete(instance)
+            if not via_signal:
+                # Check if this child completing should resume a parent
+                parent_info = self._resume_parent(
+                    instance, "completed", child_terminal_state=target_state,
+                    session_id=session_id,
+                )
+                # Fire on_complete notification
+                await self._notify("on_complete", {
+                    "name": instance.process_name,
+                    "instance_id": instance.instance_id,
+                    "state": target_state,
+                })
+        else:
+            self._emit(
+                base_event_type,
+                instance,
+                base_payload(history_entry),
+                session_id=session_id,
+            )
+            self._store.save(instance)
+
+        if via_signal:
+            self._store.append_log(
+                f"SIGNAL {instance.process_name}-{instance.instance_id}: "
+                f"received '{signal_name}', transitioned to {target_state}"
+            )
+        else:
+            self._store.append_log(
+                f"TRANSITION {instance.process_name}-{instance.instance_id}: "
+                f"{history_entry.from_state} -> {target_state}"
+            )
+
+        result = TransitionResult(
+            success=True,
+            new_state=target_state,
+            validation_results=[_vr_to_dict(r) for r in all_results],
+            available_transitions=target.transitions if target else [],
+            role=target.role if target else "",
+            agent_context=(
+                target.agent_context.model_dump()
+                if target and target.agent_context else None
+            ),
+            skill_directives=[
+                {"skill": sd.skill, "args": sd.args}
+                for sd in (target.skill_directives if target else [])
+            ],
+            required_metadata=[
+                {"key": rm.key, "description": rm.description}
+                for rm in (target.required_metadata if target else [])
+            ],
+        )
+
+        if target is not None and target.type == StateType.terminal:
+            result.summary = _compute_summary(instance)
+
+        if parent_info:
+            result.parent_resumed = True
+            result.parent_instance_id = parent_info["parent_instance_id"]
+            result.parent_available_transitions = parent_info["available_transitions"]
+
+        return result
+
     async def transition(
         self, instance_id: str, target_state: str,
         metadata: dict[str, Any] | None = None,
@@ -713,7 +1003,7 @@ class Engine:
                 message="on_enter validation failed",
             )
 
-        # Transition succeeds
+        # Transition succeeds: commit through the canonical entry path
         history_entry = HistoryEntry(**{
             "from": instance.current_state,
             "to": target_state,
@@ -723,218 +1013,10 @@ class Engine:
             "validations": [_vr_to_dict(r) for r in all_results],
             "metadata": metadata or {},
         })
-        instance.current_state = target_state
-        instance.history.append(history_entry)
-
-        # Run on_enter actions
-        await self._run_actions(
-            target, "on_enter", instance, validation_params, session_id
+        return await self._enter_state(
+            instance, defn, target, history_entry, all_results,
+            validation_params, session_id, metadata=metadata,
         )
-
-        # Handle dispatch states (async subprocess: create child, don't suspend)
-        if target.type == StateType.dispatch:
-            # Extract string values from metadata for parameter forwarding
-            extra_params = {
-                k: str(v) for k, v in (metadata or {}).items()
-                if isinstance(v, (str, int, float, bool))
-            }
-            child_result = self._dispatch_child(instance, target, extra_params=extra_params)
-            immediate_state = defn.get_state(target.immediate)
-            if immediate_state is None:
-                raise TransitionError(
-                    f"Dispatch immediate target '{target.immediate}' "
-                    f"not found in definition"
-                )
-
-            # Second history entry for the automatic transition
-            auto_entry = HistoryEntry(**{
-                "from": target_state,
-                "to": target.immediate,
-                "at": _now_iso(),
-                "triggered_by": f"dispatch: {target.process}",
-                "role": immediate_state.role,
-                "session_id": session_id,
-                "metadata": {
-                    "dispatched_instance": child_result["instance_id"],
-                    "dispatched_process": child_result["process_name"],
-                },
-            })
-            instance.current_state = target.immediate
-            instance.history.append(auto_entry)
-            self._emit(
-                "transition",
-                instance,
-                self._entry_payload(history_entry),
-                session_id=session_id,
-            )
-            self._emit(
-                "dispatch",
-                instance,
-                {
-                    **self._entry_payload(auto_entry),
-                    "child_instance_id": child_result["instance_id"],
-                    "child_process": child_result["process_name"],
-                },
-                session_id=session_id,
-            )
-            self._store.save(instance)
-
-            self._store.append_log(
-                f"DISPATCH {instance.process_name}-{instance.instance_id}: "
-                f"created {child_result['process_name']}-"
-                f"{child_result['instance_id']}, "
-                f"continued to {target.immediate}"
-            )
-
-            return TransitionResult(
-                success=True,
-                new_state=target.immediate,
-                validation_results=[_vr_to_dict(r) for r in all_results],
-                available_transitions=immediate_state.transitions,
-                role=immediate_state.role,
-                agent_context=immediate_state.agent_context.model_dump() if immediate_state.agent_context else None,
-                message=(
-                    f"Dispatched '{target.process}' as instance "
-                    f"{child_result['instance_id']}, "
-                    f"continued to '{target.immediate}'"
-                ),
-                subprocess_started=child_result["instance_id"],
-            )
-
-        # Handle wait states
-        if target.type == StateType.wait:
-            instance.waiting = True
-            self._emit(
-                "transition",
-                instance,
-                {
-                    **self._entry_payload(history_entry),
-                    "waiting": True,
-                    "signal": target.signal.name,
-                },
-                session_id=session_id,
-            )
-            self._store.save(instance)
-
-            self._store.append_log(
-                f"TRANSITION {instance.process_name}-{instance.instance_id}: "
-                f"{history_entry.from_state} -> {target_state} (waiting for signal "
-                f"'{target.signal.name}')"
-            )
-
-            return TransitionResult(
-                success=True,
-                new_state=target_state,
-                validation_results=[_vr_to_dict(r) for r in all_results],
-                available_transitions=[],
-                role=target.role,
-                agent_context=target.agent_context.model_dump() if target.agent_context else None,
-                message=f"Waiting for signal '{target.signal.name}'",
-            )
-
-        # Handle subprocess states
-        if target.type == StateType.subprocess:
-            child_result = self._start_subprocess(instance, target)
-            self._emit(
-                "transition",
-                instance,
-                self._entry_payload(history_entry),
-                session_id=session_id,
-            )
-            self._emit(
-                "subprocess_started",
-                instance,
-                {
-                    "child_instance_id": child_result["instance_id"],
-                    "child_process": child_result["process_name"],
-                    "suspended": True,
-                },
-                session_id=session_id,
-            )
-            self._store.save(instance)
-
-            self._store.append_log(
-                f"TRANSITION {instance.process_name}-{instance.instance_id}: "
-                f"{history_entry.from_state} -> {target_state} "
-                f"(subprocess {child_result['instance_id']} started)"
-            )
-
-            return TransitionResult(
-                success=True,
-                new_state=target_state,
-                validation_results=[_vr_to_dict(r) for r in all_results],
-                available_transitions=[],
-                message=f"Subprocess '{target.process}' started",
-                subprocess_started=child_result["instance_id"],
-            )
-
-        # Handle terminal states
-        if target.type == StateType.terminal:
-            self._emit(
-                "transition",
-                instance,
-                self._entry_payload(history_entry),
-                session_id=session_id,
-            )
-            self._emit(
-                "complete",
-                instance,
-                {"final_state": target_state},
-                session_id=session_id,
-            )
-            self._store.complete(instance)
-            # Check if this child completing should resume a parent
-            parent_info = self._resume_parent(
-                instance, "completed", child_terminal_state=target_state,
-                session_id=session_id,
-            )
-            # Fire on_complete notification
-            await self._notify("on_complete", {
-                "name": instance.process_name,
-                "instance_id": instance.instance_id,
-                "state": target_state,
-            })
-        else:
-            self._emit(
-                "transition",
-                instance,
-                self._entry_payload(history_entry),
-                session_id=session_id,
-            )
-            self._store.save(instance)
-            parent_info = None
-
-        self._store.append_log(
-            f"TRANSITION {instance.process_name}-{instance.instance_id}: "
-            f"{history_entry.from_state} -> {target_state}"
-        )
-
-        result = TransitionResult(
-            success=True,
-            new_state=target_state,
-            validation_results=[_vr_to_dict(r) for r in all_results],
-            available_transitions=target.transitions,
-            role=target.role,
-            agent_context=target.agent_context.model_dump() if target.agent_context else None,
-            skill_directives=[
-                {"skill": sd.skill, "args": sd.args}
-                for sd in target.skill_directives
-            ],
-            required_metadata=[
-                {"key": rm.key, "description": rm.description}
-                for rm in target.required_metadata
-            ],
-        )
-
-        if target.type == StateType.terminal:
-            result.summary = _compute_summary(instance)
-
-        if parent_info:
-            result.parent_resumed = True
-            result.parent_instance_id = parent_info["parent_instance_id"]
-            result.parent_available_transitions = parent_info["available_transitions"]
-
-        return result
 
     def _start_subprocess(
         self, parent: ProcessInstance, state: ProcessState
@@ -1358,121 +1440,20 @@ class Engine:
                 "metadata": {"signal_data": data},
             })
 
-            instance.current_state = target_state
-            instance.history.append(history_entry)
-
-            # Run on_enter actions for the target, matching transition().
-            if target is not None:
-                await self._run_actions(
-                    target, "on_enter", instance, validation_params,
-                    session_id,
-                )
-
-            # Handle dispatch states reached via signal
-            if target and target.type == StateType.dispatch:
-                extra_params = {
-                    k: str(v) for k, v in data.items()
-                    if isinstance(v, (str, int, float, bool))
-                }
-                child_result = self._dispatch_child(
-                    instance, target, extra_params=extra_params,
-                )
-                immediate_state = defn.get_state(target.immediate)
-
-                auto_entry = HistoryEntry(**{
-                    "from": target_state,
-                    "to": target.immediate,
-                    "at": _now_iso(),
-                    "triggered_by": f"dispatch: {target.process}",
-                    "role": immediate_state.role if immediate_state else "",
-                    "session_id": session_id,
-                    "metadata": {
-                        "dispatched_instance": child_result["instance_id"],
-                        "dispatched_process": child_result["process_name"],
-                    },
-                })
-                instance.current_state = target.immediate
-                instance.history.append(auto_entry)
-                self._emit(
-                    "signal_received",
-                    instance,
-                    {
-                        **self._entry_payload(history_entry),
-                        "signal": signal_name,
-                        "data": data,
-                    },
-                    session_id=session_id,
-                )
-                self._emit(
-                    "dispatch",
-                    instance,
-                    {
-                        **self._entry_payload(auto_entry),
-                        "child_instance_id": child_result["instance_id"],
-                        "child_process": child_result["process_name"],
-                    },
-                    session_id=session_id,
-                )
-                self._store.save(instance)
-
-                self._store.append_log(
-                    f"SIGNAL {instance.process_name}-{instance.instance_id}: "
-                    f"received '{signal_name}', dispatched {child_result['process_name']}-"
-                    f"{child_result['instance_id']}, continued to {target.immediate}"
-                )
-
-                result["new_state"] = target.immediate
-                result["available_transitions"] = immediate_state.transitions if immediate_state else []
-                result["role"] = immediate_state.role if immediate_state else ""
-                result["subprocess_started"] = child_result["instance_id"]
-            elif target and target.type == StateType.terminal:
-                self._emit(
-                    "signal_received",
-                    instance,
-                    {
-                        **self._entry_payload(history_entry),
-                        "signal": signal_name,
-                        "data": data,
-                    },
-                    session_id=session_id,
-                )
-                self._emit(
-                    "complete",
-                    instance,
-                    {"final_state": target_state, "via": "signal"},
-                    session_id=session_id,
-                )
-                self._store.complete(instance)
-
-                self._store.append_log(
-                    f"SIGNAL {instance.process_name}-{instance.instance_id}: "
-                    f"received '{signal_name}', transitioned to {target_state}"
-                )
-
-                result["new_state"] = target_state
-                result["available_transitions"] = []
-                result["role"] = target.role if target else ""
-            else:
-                self._emit(
-                    "signal_received",
-                    instance,
-                    {
-                        **self._entry_payload(history_entry),
-                        "signal": signal_name,
-                        "data": data,
-                    },
-                    session_id=session_id,
-                )
-                self._store.save(instance)
-
-                self._store.append_log(
-                    f"SIGNAL {instance.process_name}-{instance.instance_id}: "
-                    f"received '{signal_name}', transitioned to {target_state}"
-                )
-
-                result["new_state"] = target_state
-                result["available_transitions"] = target.transitions if target else []
-                result["role"] = target.role if target else ""
+            # Commit through the canonical entry path (signal semantics:
+            # signal_received events, SIGNAL log lines, dispatch params
+            # from the signal data). The dict below keeps its historical
+            # key set, so only the fields it always carried are copied.
+            tr = await self._enter_state(
+                instance, defn, target, history_entry, [],
+                validation_params, session_id,
+                signal_name=signal_name, signal_data=data,
+            )
+            result["new_state"] = tr.new_state
+            result["available_transitions"] = tr.available_transitions
+            result["role"] = tr.role
+            if tr.subprocess_started:
+                result["subprocess_started"] = tr.subprocess_started
         else:
             # Signal received but no transition yet; record it and unlock
             # transitions. There is no target state, so there are no gates to
