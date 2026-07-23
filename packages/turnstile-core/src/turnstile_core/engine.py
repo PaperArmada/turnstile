@@ -616,7 +616,7 @@ class Engine:
         pre-refactor behavior, the signal path also does NOT handle wait or
         subprocess targets specially and does NOT resume a suspended parent
         or fire on_complete when entering a terminal state; those
-        asymmetries are tracked upstream rather than silently changed here.
+        asymmetries are tracked as GH-41 rather than silently changed here.
         ``target`` may be None only on the signal path (a transitions list
         naming a state missing from the definition), which degrades to the
         plain-entry branch exactly as before the extraction.
