@@ -151,9 +151,13 @@ class SubprocessRouting(BaseModel):
     on_fail: list[str] = Field(default_factory=list)
 
     def on_complete_targets(self) -> list[str]:
-        """Return all possible on_complete target state names."""
+        """Return all possible on_complete target state names.
+
+        Deduplicated preserving declaration order, so downstream edge
+        walks and their diagnostics are deterministic.
+        """
         if isinstance(self.on_complete, dict):
-            return list(set(self.on_complete.values()))
+            return list(dict.fromkeys(self.on_complete.values()))
         return self.on_complete
 
     def resolve_on_complete(self, child_terminal_state: str) -> list[str]:
@@ -168,7 +172,7 @@ class SubprocessRouting(BaseModel):
                 return [self.on_complete[child_terminal_state]]
             if "_default" in self.on_complete:
                 return [self.on_complete["_default"]]
-            return list(set(self.on_complete.values()))
+            return list(dict.fromkeys(self.on_complete.values()))
         return self.on_complete
 
 

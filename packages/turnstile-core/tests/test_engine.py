@@ -508,6 +508,71 @@ class TestValidateDefinition:
         assert result["valid"] is False
         assert len(result["errors"]) > 0
 
+    def test_clean_definition_has_no_warnings(self, engine: Engine):
+        result = engine.validate_definition(str(FIXTURES / "simple.yaml"))
+        assert result["valid"] is True
+        assert result["errors"] == []
+        assert result["warnings"] == []
+
+    def test_structural_smells_surface_as_warnings_but_stay_valid(
+        self, engine: Engine, tmp_path
+    ):
+        """Unreachable states and dead-end sinks load fine, so the file is
+        valid, but the static graph pass reports them (GH #30)."""
+        smelly = tmp_path / "smelly.yaml"
+        smelly.write_text(
+            "name: smelly\n"
+            "version: '1.0.0'\n"
+            "states:\n"
+            "  - id: start\n"
+            "    type: initial\n"
+            "    transitions: [sink, done]\n"
+            "  - id: island\n"
+            "    transitions: [done]\n"
+            "  - id: sink\n"
+            "  - id: done\n"
+            "    type: terminal\n"
+        )
+        result = engine.validate_definition(str(smelly))
+        assert result["valid"] is True
+        assert result["errors"] == []
+        assert (
+            "State 'island' is unreachable from the initial state"
+            in result["warnings"]
+        )
+        assert (
+            "State 'sink' cannot reach any terminal state (dead end)"
+            in result["warnings"]
+        )
+
+    def test_dispatch_immediate_typo_fails_at_validate(
+        self, engine: Engine, tmp_path
+    ):
+        """A dispatch immediate target that names a missing state is a load
+        error, so validate reports the file invalid (GH #30)."""
+        bad = tmp_path / "bad-dispatch.yaml"
+        bad.write_text(
+            "name: bad-dispatch\n"
+            "version: '1.0.0'\n"
+            "states:\n"
+            "  - id: start\n"
+            "    type: initial\n"
+            "    transitions: [fire]\n"
+            "  - id: fire\n"
+            "    type: dispatch\n"
+            "    process: child\n"
+            "    immediate: nowhere\n"
+            "  - id: done\n"
+            "    type: terminal\n"
+        )
+        result = engine.validate_definition(str(bad))
+        assert result["valid"] is False
+        assert any(
+            "Dispatch state 'fire' immediate target 'nowhere' "
+            "references unknown state" in e
+            for e in result["errors"]
+        )
+
 
 class TestTerminalCompletion:
     @pytest.mark.asyncio

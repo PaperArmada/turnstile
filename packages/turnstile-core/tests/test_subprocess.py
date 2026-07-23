@@ -343,6 +343,33 @@ class TestSubprocessRoutingModel:
         result = routing.resolve_on_complete("unknown")
         assert set(result) == {"deploy", "fix"}
 
+    def test_dict_on_complete_targets_preserve_declaration_order(self):
+        """Dict-form targets are deterministic (GH #30 follow-up): mapping
+        declaration order, duplicate values collapsing to their first
+        occurrence."""
+        routing = SubprocessRouting(
+            on_complete={
+                "done": "ship",
+                "partial": "review",
+                "failed": "ship",
+                "_default": "triage",
+            }
+        )
+        assert routing.on_complete_targets() == ["ship", "review", "triage"]
+
+    def test_resolve_dict_all_values_fallback_preserves_declaration_order(self):
+        routing = SubprocessRouting(
+            on_complete={
+                "done": "ship",
+                "partial": "review",
+                "failed": "ship",
+            }
+        )
+        assert routing.resolve_on_complete("unknown") == [
+            "ship",
+            "review",
+        ]
+
     def test_valid_subprocess_state_with_dict_routing(self):
         state = ProcessState(
             id="test",

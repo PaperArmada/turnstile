@@ -26,7 +26,9 @@ def edge_map(defn: ProcessDefinition) -> dict[str, list[str]]:
     on_complete forms plus on_fail), and the dispatch ``immediate``
     target. Order-preserving and deduplicated per state. Targets are
     returned as written, whether or not they exist in the definition;
-    ``analyze`` reports dangling ones.
+    ``analyze`` reports dangling ones. Duplicate state ids (constructible
+    only by bypassing model validation) keep the last state's edges;
+    ``analyze`` reports the duplication.
     """
     edges: dict[str, list[str]] = {}
     for state in defn.states:
@@ -47,7 +49,12 @@ def edge_map(defn: ProcessDefinition) -> dict[str, list[str]]:
 
 
 def reachable_states(defn: ProcessDefinition) -> set[str]:
-    """States reachable from the initial state (BFS over edge_map)."""
+    """States reachable from the initial state.
+
+    Precondition: the definition has an initial state (guaranteed for any
+    definition built through model validation); raises ValueError
+    otherwise. ``analyze`` handles the degenerate case by reporting.
+    """
     edges = edge_map(defn)
     state_ids = {s.id for s in defn.states}
     start = defn.initial_state().id
@@ -63,7 +70,7 @@ def reachable_states(defn: ProcessDefinition) -> set[str]:
 
 
 def terminal_reaching_states(defn: ProcessDefinition) -> set[str]:
-    """States with a path to some terminal (reverse BFS from terminals)."""
+    """States with a path to some terminal (reverse walk from terminals)."""
     edges = edge_map(defn)
     state_ids = {s.id for s in defn.states}
     reverse: dict[str, set[str]] = {sid: set() for sid in state_ids}
@@ -113,12 +120,30 @@ def analyze(defn: ProcessDefinition) -> GraphAnalysis:
     analysis = GraphAnalysis(edges=edge_map(defn))
     state_ids = {s.id for s in defn.states}
 
+    seen_ids: set[str] = set()
+    for state in defn.states:
+        if state.id in seen_ids:
+            analysis.errors.append(f"Duplicate state id '{state.id}'")
+        seen_ids.add(state.id)
+
     for source, targets in analysis.edges.items():
         for target in targets:
             if target not in state_ids:
                 analysis.errors.append(
                     f"State '{source}' references unknown state '{target}'"
                 )
+
+    initials = [s for s in defn.states if s.type == StateType.initial]
+    if len(initials) != 1:
+        # Reachability is meaningless without a unique entry point; report
+        # instead of raising so degenerate programmatic graphs still get a
+        # GraphAnalysis back.
+        analysis.errors.append(
+            f"Process must have exactly one initial state, "
+            f"found {len(initials)}"
+        )
+        analysis.terminal_reaching = terminal_reaching_states(defn)
+        return analysis
 
     analysis.reachable = reachable_states(defn)
     analysis.terminal_reaching = terminal_reaching_states(defn)

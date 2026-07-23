@@ -203,6 +203,50 @@ class TestProcessDefinition:
         )
         assert defn.get_state("nonexistent") is None
 
+    def test_dispatch_immediate_to_unknown_state_rejected(self):
+        """A typo'd dispatch immediate target fails at load, not mid-process
+        (GH #30)."""
+        with pytest.raises(
+            Exception,
+            match=(
+                "Dispatch state 'fire' immediate target 'nowhere' "
+                "references unknown state"
+            ),
+        ):
+            ProcessDefinition(
+                name="bad",
+                states=[
+                    ProcessState(
+                        id="start", type=StateType.initial, transitions=["fire"]
+                    ),
+                    ProcessState(
+                        id="fire",
+                        type=StateType.dispatch,
+                        process="child",
+                        immediate="nowhere",
+                    ),
+                    ProcessState(id="done", type=StateType.terminal),
+                ],
+            )
+
+    def test_dispatch_immediate_to_existing_state_accepted(self):
+        defn = ProcessDefinition(
+            name="ok",
+            states=[
+                ProcessState(
+                    id="start", type=StateType.initial, transitions=["fire"]
+                ),
+                ProcessState(
+                    id="fire",
+                    type=StateType.dispatch,
+                    process="child",
+                    immediate="done",
+                ),
+                ProcessState(id="done", type=StateType.terminal),
+            ],
+        )
+        assert defn.get_state("fire").immediate == "done"
+
 
 # ---------------------------------------------------------------------------
 # Feature-deploy fixture: full round-trip from YAML
