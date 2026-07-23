@@ -47,7 +47,7 @@ states:
     transitions: [decide, gather]
     on_exit:
       validate:
-        - command: 'test "${output_file}" = "none" && echo skip || (grep -qi option "${output_file}" 2>/dev/null && echo found || echo missing)'
+        - command: 'test "${output_file}" = "none" && echo skip || (grep -qi -- option "${output_file}" 2>/dev/null && echo found || echo missing)'
           expect: not_equals("missing")
           message: "Options should be documented before deciding"
           severity: warning
@@ -57,7 +57,7 @@ states:
     transitions: [communicate, evaluate]
     on_exit:
       validate:
-        - command: 'test "${output_file}" = "none" && echo skip || (grep -qiE "decision|rationale|chose|selected" "${output_file}" 2>/dev/null && echo found || echo missing)'
+        - command: 'test "${output_file}" = "none" && echo skip || (grep -qiE -- "decision|rationale|chose|selected" "${output_file}" 2>/dev/null && echo found || echo missing)'
           expect: not_equals("missing")
           message: "Decision and rationale should be documented"
           severity: warning

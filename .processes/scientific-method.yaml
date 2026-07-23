@@ -47,7 +47,7 @@ states:
     transitions: [experiment, question]
     on_exit:
       validate:
-        - command: 'test "${output_file}" = "none" && echo skip || (grep -qi hypothes "${output_file}" 2>/dev/null && echo found || echo missing)'
+        - command: 'test "${output_file}" = "none" && echo skip || (grep -qi -- hypothes "${output_file}" 2>/dev/null && echo found || echo missing)'
           expect: not_equals("missing")
           message: "Hypothesis should be documented before testing"
           severity: warning

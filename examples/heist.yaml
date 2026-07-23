@@ -125,7 +125,7 @@ states:
           severity: error
     on_exit:
       actions:
-        - command: "echo '[$(date)] Operation ${codename}: ${target} acquired from vault' >> /tmp/heist-log.txt"
+        - command: 'echo "[$(date)] Operation ${codename}: ${target} acquired from vault" >> /tmp/heist-log.txt'
 
   - id: escape_clean
     description: "Clean getaway. Walk out the back, van is waiting."
@@ -146,11 +146,11 @@ states:
     description: "The crew splits the take. ${codename} goes down in history."
     on_enter:
       actions:
-        - command: "echo '[$(date)] Operation ${codename}: SUCCESS - ${target} secured, crew of ${crew_size}' >> /tmp/heist-log.txt"
+        - command: 'echo "[$(date)] Operation ${codename}: SUCCESS - ${target} secured, crew of ${crew_size}" >> /tmp/heist-log.txt'
 
   - id: busted
     type: terminal
     description: "Cuffed and stuffed. The crew does 10-20 in federal prison."
     on_enter:
       actions:
-        - command: "echo '[$(date)] Operation ${codename}: BUSTED - ${target} recovered by police' >> /tmp/heist-log.txt"
+        - command: 'echo "[$(date)] Operation ${codename}: BUSTED - ${target} recovered by police" >> /tmp/heist-log.txt'

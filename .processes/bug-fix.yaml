@@ -40,7 +40,7 @@ states:
 
         - command: "git status --short | head -20"
           expect: empty
-          message: "Working tree should be clean before starting a fix"
+          message: "Uncommitted changes present (expected on loop-backs if your repro test is in progress)"
           severity: warning
 
   - id: diagnose

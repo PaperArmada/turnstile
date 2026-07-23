@@ -90,7 +90,12 @@ validate:
 
 ### Parameters
 
-Parameters are substituted into commands using `${var_name}` syntax:
+Parameter values are passed to gate and action commands as **environment
+variables**; the shell expands `${var_name}` itself. Values are never
+interpolated into the command text, which is what makes them safe to
+pass. Consequence for authors: wrap expansions in **double quotes**.
+Shell single quotes suppress expansion entirely, so
+`echo 'Deployed ${branch_name}'` prints the literal placeholder:
 
 ```yaml
 parameters:
@@ -105,7 +110,7 @@ states:
     type: terminal
     on_enter:
       actions:
-        - command: "echo 'Deployed ${branch_name} for ${ticket_id}'"
+        - command: 'echo "Deployed ${branch_name} for ${ticket_id}"'
 ```
 
 ### Evidence-based validation
