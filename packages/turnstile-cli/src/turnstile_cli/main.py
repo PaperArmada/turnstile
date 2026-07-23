@@ -1515,7 +1515,13 @@ def enforce_status(ctx: click.Context) -> None:
     # Check .claude/settings.json for hook
     settings_path = root / ".claude" / "settings.json"
     if settings_path.exists():
-        settings = json.loads(settings_path.read_text())
+        try:
+            settings = json.loads(settings_path.read_text())
+            if not isinstance(settings, dict):
+                raise ValueError("top-level value is not an object")
+        except (OSError, ValueError) as e:
+            click.echo(f"Claude Code hook: unknown ({settings_path}: {e})")
+            return
         pre_tool = settings.get("hooks", {}).get("PreToolUse", [])
         has_hook = any(
             "turnstile guard" in hk.get("command", "")

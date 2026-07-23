@@ -10,6 +10,10 @@ packages/turnstile-core/tests/test_enforcement.py.
 
 import io
 import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 import yaml
@@ -430,6 +434,174 @@ class TestSharedGroupHookPreservation:
         assert CUSTOM_HOOK_COMMAND in commands
         turnstile_cmds = [c for c in commands if "turnstile guard" in c]
         assert len(turnstile_cmds) == 1
+
+
+TORN_SETTINGS = b'{"hooks": {"PreToolUse": ['
+
+
+def _write_corrupt_settings(tmp_path) -> Path:
+    """Project skeleton with a torn .claude/settings.json."""
+    (tmp_path / ".processes").mkdir()
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir()
+    settings_path = claude_dir / "settings.json"
+    settings_path.write_bytes(TORN_SETTINGS)
+    return settings_path
+
+
+class TestCorruptSettings:
+    """A corrupt settings.json produces an actionable error and is never
+    overwritten: it can carry non-turnstile configuration (653bc09)."""
+
+    @pytest.mark.parametrize("mode", ["monitor", "enforce"])
+    def test_install_refuses_corrupt_settings_with_actionable_error(
+        self, tmp_path, mode
+    ):
+        settings_path = _write_corrupt_settings(tmp_path)
+
+        with pytest.raises(ValueError) as excinfo:
+            install_enforcement(tmp_path, mode, turnstile_dir="/opt/turnstile")
+
+        message = str(excinfo.value)
+        assert str(settings_path) in message
+        assert "will not overwrite" in message
+
+    def test_failed_install_leaves_corrupt_settings_bytes_untouched(
+        self, tmp_path
+    ):
+        settings_path = _write_corrupt_settings(tmp_path)
+
+        with pytest.raises(ValueError):
+            install_enforcement(
+                tmp_path, "monitor", turnstile_dir="/opt/turnstile"
+            )
+
+        assert settings_path.read_bytes() == TORN_SETTINGS
+
+    def test_off_refuses_corrupt_settings_with_actionable_error(
+        self, tmp_path
+    ):
+        settings_path = _write_corrupt_settings(tmp_path)
+
+        with pytest.raises(ValueError) as excinfo:
+            install_enforcement(tmp_path, "off")
+
+        message = str(excinfo.value)
+        assert str(settings_path) in message
+        assert "will not overwrite" in message
+
+    def test_failed_off_leaves_corrupt_settings_bytes_untouched(self, tmp_path):
+        settings_path = _write_corrupt_settings(tmp_path)
+
+        with pytest.raises(ValueError):
+            install_enforcement(tmp_path, "off")
+
+        assert settings_path.read_bytes() == TORN_SETTINGS
+
+
+class TestAtomicSettingsWrite:
+    """Settings writes go through the atomic-write helper; a completed
+    install/uninstall leaves no temp-file debris in .claude/."""
+
+    def test_successful_install_leaves_no_temp_files(self, tmp_path):
+        (tmp_path / ".processes").mkdir()
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / "settings.json").write_text('{"customSetting": true}\n')
+
+        install_enforcement(tmp_path, "monitor", turnstile_dir="/opt/turnstile")
+
+        assert sorted(p.name for p in claude_dir.iterdir()) == [
+            "settings.json"
+        ]
+
+    def test_successful_off_leaves_no_temp_files(self, tmp_path):
+        (tmp_path / ".processes").mkdir()
+        install_enforcement(tmp_path, "enforce", turnstile_dir="/opt/turnstile")
+
+        install_enforcement(tmp_path, "off")
+
+        claude_dir = tmp_path / ".claude"
+        assert sorted(p.name for p in claude_dir.iterdir()) == [
+            "settings.json"
+        ]
+
+    def test_crashed_settings_write_preserves_previous_settings(
+        self, tmp_path, monkeypatch
+    ):
+        """A failure at the rename boundary must leave the previous
+        settings.json intact, never a torn file (cf. TestAtomicSave in
+        core's test_persistence.py)."""
+        (tmp_path / ".processes").mkdir()
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        settings_path = claude_dir / "settings.json"
+        previous = {"customSetting": True}
+        settings_path.write_text(json.dumps(previous))
+
+        def _raise_oserror(*args, **kwargs):
+            raise OSError("simulated disk failure")
+
+        monkeypatch.setattr(os, "replace", _raise_oserror)
+
+        with pytest.raises(OSError):
+            install_enforcement(
+                tmp_path, "monitor", turnstile_dir="/opt/turnstile"
+            )
+
+        assert json.loads(settings_path.read_text()) == previous
+
+
+def _run_cli(project_root: Path, *args: str) -> subprocess.CompletedProcess:
+    """Run the CLI in a subprocess: the contract under test is what a
+    terminal user sees (real stderr, real exit code, no traceback), which
+    CliRunner masks by catching exceptions in-process (cf. test_cli_errors)."""
+    return subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from turnstile_cli.main import cli; cli()",
+            "--project",
+            str(project_root),
+            *args,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
+class TestEnforceCliOnCorruptSettings:
+    """`turnstile enforce ...` on a corrupt settings.json exits 1 with a
+    readable error, never a traceback (653bc09)."""
+
+    def test_enforce_monitor_exits_cleanly_naming_the_file(self, tmp_path):
+        settings_path = _write_corrupt_settings(tmp_path)
+
+        result = _run_cli(tmp_path, "enforce", "monitor")
+
+        assert result.returncode == 1
+        # A line starting with "Error: " (not e.g. "JSONDecodeError:"
+        # inside a traceback) that names the offending file.
+        assert result.stderr.startswith("Error: "), result.stderr
+        assert str(settings_path) in result.stderr
+        assert "Traceback" not in result.stderr, (
+            f"raw traceback leaked to the user:\n{result.stderr}"
+        )
+        assert settings_path.read_bytes() == TORN_SETTINGS
+
+    def test_enforce_off_exits_cleanly_naming_the_file(self, tmp_path):
+        settings_path = _write_corrupt_settings(tmp_path)
+
+        result = _run_cli(tmp_path, "enforce", "off")
+
+        assert result.returncode == 1
+        assert result.stderr.startswith("Error: "), result.stderr
+        assert str(settings_path) in result.stderr
+        assert "Traceback" not in result.stderr, (
+            f"raw traceback leaked to the user:\n{result.stderr}"
+        )
+        assert settings_path.read_bytes() == TORN_SETTINGS
 
 
 class TestRunGuard:

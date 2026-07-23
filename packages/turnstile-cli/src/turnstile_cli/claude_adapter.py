@@ -32,7 +32,10 @@ def _load_settings(settings_path: Path) -> dict[str, Any]:
     carry non-turnstile configuration the user would lose.
     """
     try:
-        return json.loads(settings_path.read_text())
+        settings = json.loads(settings_path.read_text())
+        if not isinstance(settings, dict):
+            raise ValueError("top-level value is not an object")
+        return settings
     except (OSError, ValueError) as e:
         raise ValueError(
             f"Cannot read {settings_path}: {e}. Fix or remove the file, "
