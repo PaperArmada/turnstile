@@ -8,7 +8,7 @@ This project uses its own process engine. Enforcement is set to **monitor** mode
 
 | Task | Process | Example |
 |------|---------|---------|
-| New feature or improvement | `feature-development` | `process_start("feature-development", {"feature_name": "enforcement", "test_command": "uv run --package turnstile-core pytest packages/turnstile-core/tests/"})` |
+| New feature or improvement | `feature-development` | `process_start("feature-development", {"feature_name": "enforcement", "test_command": "uv run --group dev python -m pytest packages/turnstile-core/tests/"})` |
 | Creating a new process definition | `create-process` | `process_start("create-process", {"name": "my-process", "purpose": "..."})` |
 | Updating the README | `readme-update` | `process_start("readme-update", {"reason": "new CLI commands"})` |
 
@@ -17,8 +17,9 @@ Use `process_status` to check active instances. Use `process_transition` to adva
 ## Development Commands
 
 ```bash
-# Run tests
-uv run --package turnstile-core pytest packages/turnstile-core/tests/ -v
+# Run tests (pytest lives in the workspace-root dev dependency group;
+# the `python -m` form avoids falling back to a globally installed pytest)
+uv run --group dev python -m pytest packages/turnstile-core/tests/ -v
 
 # Validate a process definition
 uv run --package turnstile-cli turnstile validate .processes/<name>.yaml
