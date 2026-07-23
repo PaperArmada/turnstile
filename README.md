@@ -48,7 +48,7 @@ For the full walkthrough (writing a process, driving it from an agent, and skipp
 ## What's included
 
 - **19 MCP tools** for starting, transitioning, signalling, dispatching, and inspecting process instances.
-- **A CLI** for validation, dry-run simulation, Mermaid diagrams, JSON Schema export, CI integration, git hooks, and enforcement management.
+- **A CLI** for validation, dry-run simulation, trajectory review (`turnstile history`), Mermaid diagrams, JSON Schema export, CI integration, git hooks, and enforcement management.
 - **Built-in starter processes** including general-purpose (`peer-review`, `decision-record`, `scientific-method`) and developer-oriented (`feature-development`, `bug-fix`, `release`, `spike`, `code-review`).
 - **Enforcement modes** (`off`, `monitor`, `enforce`) wired into Claude Code via PreToolUse hooks. `monitor` warns on edits made without an active process; `enforce` blocks Edit and Write when the current state forbids them. The hook gates the Edit/Write tools, not the contents of shell commands.
 - **Process inheritance and shared packages** for reusing definitions across projects.

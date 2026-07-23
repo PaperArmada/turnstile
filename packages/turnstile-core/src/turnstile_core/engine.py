@@ -930,6 +930,7 @@ class Engine:
             to_state=target_state,
             at=_now_iso(),
             reason=reason,
+            triggered_by=session_id,
         )
 
         history_entry = HistoryEntry(**{
@@ -1290,10 +1291,57 @@ class Engine:
                 "validations": h.validations,
                 "triggered_by": h.triggered_by,
             }
+            if h.role:
+                entry["role"] = h.role
+            if h.session_id:
+                entry["session_id"] = h.session_id
             if h.metadata:
                 entry["metadata"] = h.metadata
             result.append(entry)
         return result
+
+    def trajectory(self, instance_id: str) -> dict[str, Any]:
+        """Full recorded trajectory of an instance, for human review.
+
+        Unlike history(), includes the instance envelope (status, current
+        state, parameters, actor attribution, timestamps) and the override
+        log, so a reviewer sees the whole record rather than transitions
+        alone. Searches active, completed, and abandoned instances.
+        """
+        instance = self._store.load_any(instance_id)
+        transitions: list[dict[str, Any]] = []
+        for h in instance.history:
+            transitions.append(
+                {
+                    "from_state": h.from_state,
+                    "to_state": h.to_state,
+                    "timestamp": h.at,
+                    "triggered_by": h.triggered_by,
+                    "role": h.role,
+                    "session_id": h.session_id,
+                    "validations": h.validations,
+                    "metadata": h.metadata,
+                }
+            )
+        return {
+            "instance_id": instance.instance_id,
+            "process_name": instance.process_name,
+            "process_version": instance.process_version,
+            "status": instance.status,
+            "current_state": instance.current_state,
+            "started_at": instance.started_at,
+            "updated_at": instance.updated_at,
+            "started_by": instance.started_by,
+            "parameters": instance.parameters,
+            "waiting": instance.waiting,
+            "signal_data": instance.signal_data,
+            "parent_instance_id": instance.parent_instance_id,
+            "parent_state_id": instance.parent_state_id,
+            "child_instance_id": instance.child_instance_id,
+            "suspended": instance.suspended,
+            "transitions": transitions,
+            "overrides": [o.model_dump() for o in instance.overrides],
+        }
 
     def graph(self, name: str) -> dict[str, Any]:
         """Generate a Mermaid state diagram for a process definition."""

@@ -174,6 +174,12 @@ turnstile list
 turnstile status
 turnstile status --all
 
+# Show the recorded trajectory of an instance (active or archived):
+# every transition with actor attribution (triggered_by, role, session),
+# validation gate results, structured metadata, and the override log
+turnstile history a3f2dd9c01b7
+turnstile history a3f2dd9c01b7 --json
+
 # Generate a Mermaid state diagram
 turnstile graph feature-deploy
 

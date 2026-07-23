@@ -7,6 +7,22 @@ described in [STABILITY.md](STABILITY.md).
 
 ## [Unreleased]
 
+### Added
+
+- `turnstile history <instance_id>` — render the recorded trajectory of an
+  instance (active or archived): every transition with actor attribution
+  (triggered_by, role, session), validation gate results, structured
+  metadata, and the override log. `--json` emits the full record. Rendered
+  values are sanitized so recorded control characters cannot rewrite the
+  terminal view under review.
+- `process_history` (MCP) entries now include `role` and `session_id` when
+  recorded.
+
+### Fixed
+
+- Skip overrides record the acting session in `triggered_by`; previously the
+  override log carried no actor attribution.
+
 ## [0.1.1] - 2026-07-23
 
 ### Fixed

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import NoReturn
+from typing import Any, NoReturn
 
 import click
 
@@ -22,7 +23,7 @@ from turnstile_core.guard import (
     run_guard,
     update_registry_enforcement,
 )
-from turnstile_core.errors import ProcessNotFoundError
+from turnstile_core.errors import InstanceNotFoundError, ProcessNotFoundError
 from turnstile_core.hooks import generate_hook, install_hook, uninstall_hook
 from turnstile_core.inheritance import resolve_inheritance
 from turnstile_core.loader import (
@@ -312,6 +313,149 @@ def status(ctx: click.Context, show_all: bool) -> None:
             click.echo(f"    Updated: {inst['updated_at']}")
             click.echo(
                 f"    Next: {', '.join(inst['available_transitions'])}"
+            )
+
+
+def _render_value(value: Any, limit: int = 200) -> str:
+    """Make a recorded value safe to echo in the trajectory render.
+
+    Every rendered field is writable by the agent under review (transition
+    metadata, gate output, skip reasons), so control characters must not
+    reach the terminal: a \\r or ANSI escape could redraw the line and spoof
+    the audit view a human is reading. Escapes C0 controls and DEL visibly,
+    JSON-encodes non-scalar values, and truncates long ones.
+    """
+    if isinstance(value, (dict, list)):
+        text = json.dumps(value)
+    else:
+        text = str(value)
+    text = re.sub(
+        r"[\x00-\x1f\x7f]",
+        lambda m: repr(m.group())[1:-1],
+        text,
+    )
+    if len(text) > limit:
+        text = text[: limit - 1] + "…"
+    return text
+
+
+@cli.command()
+@click.argument("instance_id")
+@click.option(
+    "--json", "as_json", is_flag=True, help="Emit the full record as JSON."
+)
+@click.pass_context
+def history(ctx: click.Context, instance_id: str, as_json: bool) -> None:
+    """Show the recorded trajectory of a process instance.
+
+    Renders every transition with any recorded actor attribution
+    (triggered_by, role, session), validation gate results, and
+    structured metadata, followed by the override log. Searches active,
+    completed, and abandoned instances, so completed work stays
+    reviewable.
+    """
+    try:
+        engine = _get_engine(ctx.obj["project"])
+        record = engine.trajectory(instance_id)
+    except Exception as e:
+        # InstanceNotFoundError, torn/hand-edited state files, broken
+        # registry: all surface as one readable line, never a traceback.
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1)
+
+    if as_json:
+        click.echo(json.dumps(record, indent=2))
+        return
+
+    status = record["status"]
+    if record["waiting"]:
+        status = f"{status} (waiting for signal)"
+    elif record["suspended"]:
+        status = f"{status} (suspended on subprocess)"
+    click.echo(
+        f"{_render_value(record['process_name'])} "
+        f"[{record['instance_id']}] "
+        f"{status} @ {_render_value(record['current_state'])}"
+    )
+    if record["parameters"]:
+        params = ", ".join(
+            f"{_render_value(k)}={_render_value(v)}"
+            for k, v in record["parameters"].items()
+        )
+        click.echo(f"  parameters: {params}")
+    started_by = (
+        f" by {_render_value(record['started_by'])}"
+        if record["started_by"]
+        else ""
+    )
+    click.echo(f"  started {record['started_at']}{started_by}")
+    click.echo(f"  updated {record['updated_at']}")
+    if record["parent_instance_id"]:
+        parent_state = (
+            f" @ {_render_value(record['parent_state_id'])}"
+            if record["parent_state_id"]
+            else ""
+        )
+        click.echo(
+            f"  parent: [{record['parent_instance_id']}]{parent_state}"
+        )
+    if record["child_instance_id"]:
+        click.echo(f"  child: [{record['child_instance_id']}]")
+
+    transitions = record["transitions"]
+    if not transitions:
+        click.echo("\nNo transitions recorded.")
+    else:
+        click.echo(f"\nTransitions ({len(transitions)}):")
+        for t in transitions:
+            actor_bits = [
+                bit
+                for bit in (
+                    _render_value(t["triggered_by"])
+                    if t["triggered_by"]
+                    else "",
+                    f"role={_render_value(t['role'])}" if t["role"] else "",
+                    f"session={_render_value(t['session_id'])}"
+                    if t["session_id"]
+                    else "",
+                )
+                if bit
+            ]
+            actor = f"  ({', '.join(actor_bits)})" if actor_bits else ""
+            click.echo(
+                f"  {t['timestamp']}  "
+                f"{_render_value(t['from_state'])} -> "
+                f"{_render_value(t['to_state'])}{actor}"
+            )
+            for v in t["validations"]:
+                if v.get("passed"):
+                    mark = "ok"
+                else:
+                    mark = v.get("severity") or "error"
+                label = v.get("message") or v.get("command", "")
+                click.echo(f"      [{mark}] {_render_value(label)}")
+                if not v.get("passed") and v.get("output"):
+                    first_line = str(v["output"]).splitlines()[0]
+                    click.echo(
+                        f"          {_render_value(first_line, limit=120)}"
+                    )
+            for key, value in (t["metadata"] or {}).items():
+                click.echo(
+                    f"      {_render_value(key)}: {_render_value(value)}"
+                )
+
+    if record["overrides"]:
+        click.echo(f"\nOverrides ({len(record['overrides'])}):")
+        for o in record["overrides"]:
+            actor = (
+                _render_value(o["triggered_by"])
+                if o.get("triggered_by")
+                else "unknown"
+            )
+            click.echo(
+                f"  {o['at']}  {_render_value(o['from_state'])} -> "
+                f"{_render_value(o['to_state'])} "
+                f"by {actor}: {_render_value(o['reason'])}"
             )
 
 

@@ -1,0 +1,16 @@
+name: roled
+description: "Process with a role-bearing state for history attribution tests"
+version: "1.0.0"
+
+states:
+  - id: start
+    type: initial
+    transitions: [implement]
+
+  - id: implement
+    description: "Work performed under the implementer role"
+    role: implementer
+    transitions: [done]
+
+  - id: done
+    type: terminal
