@@ -28,11 +28,19 @@ described in [STABILITY.md](STABILITY.md).
   terminal view under review.
 - `process_history` (MCP) entries now include `role` and `session_id` when
   recorded.
+- **Action failures are observable** — an `on_enter`/`on_exit` action that
+  fails (non-zero exit, timeout, or execution error) emits an
+  `action_failed` event to the stream and an `ACTION FAILED` line to
+  log.txt. Actions still never block the state change. Previously every
+  action failure was silently swallowed. (#31)
 
 ### Fixed
 
 - Skip overrides record the acting session in `triggered_by`; previously the
   override log carried no actor attribution.
+- Gate and action commands that emit non-UTF-8 bytes no longer raise
+  `UnicodeDecodeError` out of the command runner; output is decoded
+  lossily (`errors="replace"`).
 
 ## [0.1.1] - 2026-07-23
 

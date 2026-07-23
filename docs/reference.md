@@ -341,8 +341,16 @@ Every state mutation appends one (or a documented set of) typed events to
 `instance_id`, `process_name`, a per-instance `seq`, `at`, `session_id`,
 `actor`, and `payload`. Event types: `started`, `transition`, `dispatch`,
 `subprocess_started`, `signal_received`, `skip`, `undo`, `abandon`,
-`complete`, `handoff`, `parent_resumed`. Transition-shaped payloads carry
-the full history-entry data.
+`complete`, `handoff`, `parent_resumed`, `action_failed`. Transition-shaped
+payloads carry the full history-entry data.
+
+An `on_enter`/`on_exit` action that fails (non-zero exit, timeout, or
+execution error) never blocks the state change, but the failure is
+recorded: an `action_failed` event carrying the phase, state, command,
+exit code or error, and the tail of the command's output, plus an
+`ACTION FAILED` line in `log.txt`. Because actions run before the
+transition's own persist, an `action_failed` event can precede a
+transition that gates then reject; the dedupe rule below covers this.
 
 Consumer contract for the stream, which is a **shadow record** while the
 instance JSON remains the source of truth:

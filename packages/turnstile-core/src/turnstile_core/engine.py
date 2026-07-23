@@ -513,39 +513,61 @@ class Engine:
         )
         return results, has_blocking_failures(results)
 
-    async def _run_exit_actions(
-        self, state: ProcessState, validation_params: dict[str, str],
+    async def _run_actions(
+        self,
+        state: ProcessState,
+        phase: str,
+        instance: ProcessInstance,
+        validation_params: dict[str, str],
+        session_id: str = "",
     ) -> None:
-        """Run a state's on_exit actions (best-effort side effects).
+        """Run a state's on_enter/on_exit actions (non-blocking side effects).
 
-        Shared by transition and receive_signal so a signal-driven state
-        change runs the same actions as an ordinary one.
+        ``phase`` is ``"on_exit"`` or ``"on_enter"``. Shared by transition and
+        receive_signal so a signal-driven state change runs the same actions
+        as an ordinary one.
+
+        Actions never block the state change, but a failure is recorded, not
+        swallowed: a non-zero exit or an execution error emits an
+        ``action_failed`` event to the stream and appends a line to log.txt.
+        Actions are side effects in the audit layer itself (notifications,
+        markers); a failure that vanishes without trace is data loss.
         """
-        if not (state.on_exit and state.on_exit.actions):
+        hooks = state.on_exit if phase == "on_exit" else state.on_enter
+        if not (hooks and hooks.actions):
             return
-        for action in state.on_exit.actions:
+        for action in hooks.actions:
+            exit_code: int | None = None
+            output = ""
+            error = ""
             try:
-                await run_command(
+                output, exit_code = await run_command(
                     action.command, self.project_root, timeout=60,
                     parameters=validation_params,
                 )
-            except Exception:
-                pass  # Actions are best-effort
-
-    async def _run_enter_actions(
-        self, state: ProcessState, validation_params: dict[str, str],
-    ) -> None:
-        """Run a state's on_enter actions. See _run_exit_actions."""
-        if not (state.on_enter and state.on_enter.actions):
-            return
-        for action in state.on_enter.actions:
-            try:
-                await run_command(
-                    action.command, self.project_root, timeout=60,
-                    parameters=validation_params,
-                )
-            except Exception:
-                pass  # Actions are best-effort
+            except (TimeoutError, OSError) as exc:
+                error = f"{type(exc).__name__}: {exc}"
+            if exit_code == 0:
+                continue
+            self._emit(
+                "action_failed",
+                instance,
+                payload={
+                    "phase": phase,
+                    "state": state.id,
+                    "command": action.command,
+                    "exit_code": exit_code,
+                    "error": error,
+                    "output": output[-500:],
+                },
+                session_id=session_id,
+            )
+            detail = f"exit {exit_code}" if exit_code is not None else error
+            self._store.append_log(
+                f"ACTION FAILED {instance.process_name}-"
+                f"{instance.instance_id} {phase} {state.id} "
+                f"({detail}): {action.command}"
+            )
 
     async def transition(
         self, instance_id: str, target_state: str,
@@ -647,7 +669,9 @@ class Engine:
             )
 
         # Run on_exit actions for current state
-        await self._run_exit_actions(current, validation_params)
+        await self._run_actions(
+            current, "on_exit", instance, validation_params, session_id
+        )
 
         # Run on_enter validations for target state
         enter_results, enter_blocked = await self._run_enter_gates(
@@ -677,7 +701,9 @@ class Engine:
         instance.history.append(history_entry)
 
         # Run on_enter actions
-        await self._run_enter_actions(target, validation_params)
+        await self._run_actions(
+            target, "on_enter", instance, validation_params, session_id
+        )
 
         # Handle dispatch states (async subprocess: create child, don't suspend)
         if target.type == StateType.dispatch:
@@ -1287,7 +1313,9 @@ class Engine:
             # Gates passed: now commit the signal and clear the wait.
             instance.signal_data = data
             instance.waiting = False
-            await self._run_exit_actions(current, validation_params)
+            await self._run_actions(
+                current, "on_exit", instance, validation_params, session_id
+            )
 
             if gate_results:
                 result["validation_results"] = [
@@ -1309,7 +1337,10 @@ class Engine:
 
             # Run on_enter actions for the target, matching transition().
             if target is not None:
-                await self._run_enter_actions(target, validation_params)
+                await self._run_actions(
+                    target, "on_enter", instance, validation_params,
+                    session_id,
+                )
 
             # Handle dispatch states reached via signal
             if target and target.type == StateType.dispatch:

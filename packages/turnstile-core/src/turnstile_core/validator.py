@@ -233,7 +233,9 @@ async def run_command(
         await proc.communicate()
         raise
 
-    return stdout.decode().strip(), proc.returncode or 0
+    # Lossy decode: a command that emits non-UTF-8 bytes should surface as
+    # garbled output, not raise UnicodeDecodeError out of the runner.
+    return stdout.decode(errors="replace").strip(), proc.returncode or 0
 
 
 # ---------------------------------------------------------------------------
