@@ -81,6 +81,34 @@ def test_init_respects_enforce_mode(tmp_path):
     assert registry["settings"]["enforcement"] == "enforce"
 
 
+def test_init_enforce_off_yields_usable_registry(tmp_path):
+    """`init --enforce off` writes enforcement as the string "off".
+
+    Target mutant: substituting the mode unquoted into the registry
+    template. YAML 1.1 reads a bare `off` as boolean False, which
+    RegistrySettings rejects, so every subsequent command in the project
+    would fail at registry load.
+    """
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "--project", str(tmp_path),
+            "init", "--dev", "--turnstile-dir", str(REPO_ROOT),
+            "--enforce", "off",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    registry = yaml.safe_load(
+        (tmp_path / ".processes" / "registry.yaml").read_text()
+    )
+    assert registry["settings"]["enforcement"] == "off"  # string, not False
+
+    listed = runner.invoke(cli, ["--project", str(tmp_path), "list"])
+    assert listed.exit_code == 0, listed.output
+    assert "feature-development" in listed.output
+
+
 def test_init_does_not_overwrite_existing_definitions(tmp_path):
     """Re-running init never clobbers an edited local definition."""
     proc_dir = tmp_path / ".processes"

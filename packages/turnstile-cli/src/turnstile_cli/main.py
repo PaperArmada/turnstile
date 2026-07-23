@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import NoReturn
 
 import click
 
@@ -21,6 +22,7 @@ from turnstile_core.guard import (
     run_guard,
     update_registry_enforcement,
 )
+from turnstile_core.errors import ProcessNotFoundError
 from turnstile_core.hooks import generate_hook, install_hook, uninstall_hook
 from turnstile_core.inheritance import resolve_inheritance
 from turnstile_core.loader import (
@@ -84,6 +86,54 @@ def _get_engine(project_root: str | None = None) -> Engine:
     return Engine(root)
 
 
+def _exit_process_not_found(
+    project_root: str | None, name: str, exc: Exception
+) -> NoReturn:
+    """Report an unresolvable process name and exit 1.
+
+    When the error concerns the queried name and a matching file exists in
+    .processes/ unregistered, say so: a non-empty registry.local disables
+    auto-discovery, so "valid file, unknown process" is a registration
+    problem, not a YAML problem. The name check matters because the engine
+    can also raise about a *different* process (e.g. a registry entry whose
+    file is missing), where the hint would mislead.
+    """
+    click.echo(f"Error: {exc}", err=True)
+    root = Path(project_root) if project_root else Path.cwd()
+    candidate = root / ".processes" / f"{name}.yaml"
+    if f"'{name}'" in str(exc) and candidate.exists():
+        try:
+            registered: list[str] | None = load_registry(root).local or []
+        except Exception:
+            registered = None
+        if registered is not None and name not in registered:
+            click.echo(
+                f".processes/{name}.yaml exists but is not registered. "
+                f'Add "- {name}" under "local:" in .processes/registry.yaml.',
+                err=True,
+            )
+        elif registered is not None:
+            try:
+                actual = load_definition(candidate).name
+            except Exception:
+                actual = None
+            if actual and actual != name:
+                click.echo(
+                    f'.processes/{name}.yaml is registered but defines '
+                    f'"name: {actual}"; processes are addressed by that '
+                    f'internal "name:" field. Try \'{actual}\'.',
+                    err=True,
+                )
+            else:
+                click.echo(
+                    f".processes/{name}.yaml is registered, but processes "
+                    'are addressed by their internal "name:" field, which '
+                    "may differ from the filename.",
+                    err=True,
+                )
+    raise SystemExit(1)
+
+
 @click.group()
 @click.option(
     "--project",
@@ -100,6 +150,52 @@ def cli(ctx: click.Context, project: str | None) -> None:
     if project is None:
         project = os.environ.get("TURNSTILE_PROJECT_DIR")
     ctx.obj["project"] = project
+
+
+def _preexisting_definition_stems(proc_dir: Path) -> list[str]:
+    """Stems of process files that predate init's starter pack.
+
+    Covers both plain definitions and top-level override files: a non-empty
+    registry.local disables auto-discovery entirely, so anything left off the
+    list becomes silently unstartable. Excludes registry.yaml and starter
+    filenames. Files that do not parse, and overrides whose extends target
+    will not exist post-init, are skipped with a warning rather than
+    registered: registry-listed files are on the loader's strict path, where
+    any load or resolution failure fails hard in every discovery and would
+    break all name-based commands.
+    """
+    stems: list[str] = []
+    known_names = {Path(filename).stem for filename in STARTERS}
+    overrides: list[tuple[Path, str]] = []
+    for path in sorted(proc_dir.glob("*.yaml")):
+        if path.name == "registry.yaml" or path.name in STARTERS:
+            continue
+        try:
+            if _is_override_file(path):
+                overrides.append((path, load_override(path).extends))
+                continue
+            defn = load_definition(path)
+        except Exception as e:
+            click.echo(
+                f"Warning: {path.name} is not a loadable process definition "
+                f"({e}); not registered. Fix it and add it to "
+                ".processes/registry.yaml manually.",
+                err=True,
+            )
+            continue
+        known_names.add(defn.name)
+        stems.append(path.stem)
+    for path, parent in overrides:
+        if parent in known_names:
+            stems.append(path.stem)
+        else:
+            click.echo(
+                f"Warning: {path.name} extends '{parent}', which will not "
+                "exist after init; not registered. Fix the extends target "
+                "and add it to .processes/registry.yaml manually.",
+                err=True,
+            )
+    return stems
 
 
 def _load_definition_or_override(path: Path) -> "ProcessDefinition":
@@ -161,9 +257,11 @@ def info(ctx: click.Context, name: str) -> None:
     descriptions and permissions, and metadata. Use this to discover
     what parameters are needed before starting a process.
     """
-    engine = _get_engine(ctx.obj["project"])
     try:
+        engine = _get_engine(ctx.obj["project"])
         result = engine.info(name)
+    except ProcessNotFoundError as e:
+        _exit_process_not_found(ctx.obj["project"], name, e)
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         raise SystemExit(1)
@@ -302,8 +400,11 @@ def graph(ctx: click.Context, name: str | None, file_path: str | None) -> None:
         defn = _load_definition_or_override(Path(file_path))
         result = generate_mermaid(defn)
     elif name:
-        engine = _get_engine(ctx.obj["project"])
-        result = engine.graph(name)
+        try:
+            engine = _get_engine(ctx.obj["project"])
+            result = engine.graph(name)
+        except ProcessNotFoundError as e:
+            _exit_process_not_found(ctx.obj["project"], name, e)
     else:
         click.echo("Error: provide a process NAME or --file PATH", err=True)
         raise SystemExit(1)
@@ -340,9 +441,12 @@ def dry_run(
         path = list(state_path) if state_path else None
         steps = simulate_dry_run(defn, path)
     elif name:
-        engine = _get_engine(ctx.obj["project"])
         path = list(state_path) if state_path else None
-        steps = engine.dry_run(name, path)
+        try:
+            engine = _get_engine(ctx.obj["project"])
+            steps = engine.dry_run(name, path)
+        except ProcessNotFoundError as e:
+            _exit_process_not_found(ctx.obj["project"], name, e)
     else:
         click.echo("Error: provide a process NAME or --file PATH", err=True)
         raise SystemExit(1)
@@ -1058,13 +1162,41 @@ def init(
                 written += 1
             created.append(f".processes/principles/ ({written} files)")
 
-        # registry.yaml — registers the starter pack and sets enforcement mode
+        # registry.yaml — registers the starter pack and sets enforcement
+        # mode. Definitions that were in .processes/ before init ran must be
+        # folded into local:, because a non-empty local list disables
+        # auto-discovery and would otherwise make them unstartable.
         registry_path = proc_dir / "registry.yaml"
         if not registry_path.exists():
-            registry_path.write_text(
-                STARTER_REGISTRY.replace("__ENFORCEMENT__", enforce_mode)
+            # Quote the mode: YAML 1.1 reads a bare `off` as boolean False,
+            # which RegistryConfig rejects, bricking every command.
+            content = STARTER_REGISTRY.replace(
+                "__ENFORCEMENT__", f"'{enforce_mode}'"
             )
-            created.append(".processes/registry.yaml")
+            preexisting = _preexisting_definition_stems(proc_dir)
+            if preexisting:
+                if "local:\n" not in content:
+                    raise RuntimeError(
+                        "STARTER_REGISTRY template drifted: 'local:' "
+                        "anchor missing; cannot register existing files"
+                    )
+                # json.dumps yields a valid YAML scalar, so hostile stems
+                # (colons, '#', leading '-') cannot corrupt the registry.
+                content = content.replace(
+                    "local:\n",
+                    "local:\n"
+                    + "".join(
+                        f"- {json.dumps(stem)}\n" for stem in preexisting
+                    ),
+                    1,
+                )
+                created.append(
+                    ".processes/registry.yaml (+ registered existing: "
+                    f"{', '.join(preexisting)})"
+                )
+            else:
+                created.append(".processes/registry.yaml")
+            registry_path.write_text(content)
     else:
         # Validate that definitions exist when connecting
         if not proc_dir.exists():
