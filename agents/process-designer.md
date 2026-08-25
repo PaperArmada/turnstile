@@ -73,6 +73,15 @@ end to end. Structure:
 - **Proposed changes**: the process definition draft (or amendments), with a
   one-line incident trace per state/gate
 - **Deliberately omitted**: changes considered and rejected, with the reason
+- **Generality audit**: before delivering, re-read every generic artifact you
+  produced (a process definition always is one) asking a single question:
+  *what does this presuppose about where it came from?* Names, dates, ticket
+  or MR numbers, version strings, and any example concrete enough to be
+  someone's real case are leakage — including in parameter examples, default
+  values, and suggested filenames, where it hides best. Strip what you find
+  and record the audit's outcome in the report ("clean", or what was
+  removed). An artifact that pre-seeds its own first use has failed the
+  audit even if every individual detail looks generic.
 
 Your final message is a summary for the session that launched you: the
 top-line findings, the path of the report, the path of any draft definition,
