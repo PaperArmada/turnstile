@@ -39,15 +39,26 @@ knowledge of "how teams usually work."
    definition:
    - Every state, gate, and validator must trace to a named incident. If you
      cannot point at the incident a gate prevents, the gate does not go in.
+     The incident traces live in the REPORT's proposed-changes section, one
+     line per state/gate; the definition itself carries no incident
+     references, dates, ticket numbers, or names. A process definition is a
+     generic artifact: the evidence justifies it, but must not appear in it.
    - Prefer the fewest states that carry the load. A definition that does not
      fit on one screen is presumptively too big.
    - Prefer mechanical checks (a command with an expected result) over
      judgment-call gates wherever a mechanical check exists.
    - New processes start in monitor mode. Do not propose blocking enforcement
      in a first draft.
-5. **Validate the draft**: `uv run --package turnstile-cli turnstile validate
-   <file>` if the CLI is available, otherwise check it against an existing
-   committed definition's structure.
+5. **Validate the draft mechanically** — structural eyeballing does not
+   catch a malformed expect expression:
+
+   ```
+   uvx --python 3.12 --from "turnstile-cli @ git+https://github.com/PaperArmada/turnstile.git@v0.1.4#subdirectory=packages/turnstile-cli" turnstile validate <file>
+   ```
+
+   (The repo's canonical pin lives in `scripts/setup-claude-tooling`; if it
+   has moved past v0.1.4, use that version.) A draft that does not pass
+   `turnstile validate` is not a deliverable.
 
 ## Output contract
 
