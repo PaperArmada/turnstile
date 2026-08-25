@@ -14,7 +14,11 @@ from typing import Any, NoReturn
 
 import click
 
-from turnstile_core.admin import generate_mermaid, simulate_dry_run
+from turnstile_core.admin import (
+    gc_stale_instances,
+    generate_mermaid,
+    simulate_dry_run,
+)
 from turnstile_core.engine import Engine
 from turnstile_core.graph import analyze as graph_analyze
 
@@ -536,6 +540,57 @@ def active(ctx: click.Context) -> None:
         transitions = inst.get("available_transitions", [])
         if transitions:
             click.echo(f"    next: {', '.join(transitions)}")
+
+
+@cli.command()
+@click.option(
+    "--older-than-days",
+    type=int,
+    default=None,
+    help=(
+        "Override the staleness threshold; must be positive "
+        "(default: settings.stale_after_days)."
+    ),
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Report what would be abandoned without moving anything.",
+)
+@click.pass_context
+def gc(ctx: click.Context, older_than_days: int | None, dry_run: bool) -> None:
+    """Abandon active instances that have gone stale.
+
+    Collects instances idle longer than the registry's
+    settings.stale_after_days (default 14). Waiting instances and
+    suspended parents are never collected. Abandoned instances move to
+    .process-state/abandoned/ like any manual abandon; nothing is
+    deleted.
+    """
+    root = ctx.obj["project"] or str(Path.cwd())
+    result = gc_stale_instances(
+        Path(root), older_than_days=older_than_days, dry_run=dry_run
+    )
+    if result.get("message"):
+        click.echo(result["message"])
+        return
+    label = "Would abandon" if dry_run else "Abandoned"
+    abandoned = result["abandoned"]
+    click.echo(
+        f"Scanned {result['scanned']} active instance(s); "
+        f"threshold {result['threshold_days']}d; skipped "
+        f"{result['skipped_waiting']} waiting, "
+        f"{result['skipped_suspended']} suspended."
+    )
+    if not abandoned:
+        click.echo("Nothing stale.")
+        return
+    click.echo(f"{label} {len(abandoned)}:")
+    for item in abandoned:
+        click.echo(
+            f"  [{item['instance_id']}] {item['process_name']} "
+            f"@ {item['current_state']} (idle {item['age_days']}d)"
+        )
 
 
 @cli.command()

@@ -99,16 +99,25 @@ async def process_info(name: str) -> dict[str, Any]:
 
 @mcp.tool()
 async def process_start(
-    name: str, parameters: dict[str, str] | None = None
+    name: str,
+    parameters: dict[str, str] | None = None,
+    cwd: str | None = None,
 ) -> dict[str, Any]:
     """Start a new instance of a named process.
 
     Args:
         name: The name of the process definition to start.
         parameters: Optional key-value parameters for the process instance.
+        cwd: Absolute path of the directory where the work happens. Pass
+             your current working directory whenever you work in a git
+             worktree (or any checkout other than the server's project
+             root) so gate and action commands run there. Must be an
+             existing absolute directory (rejected otherwise). Defaults
+             to the server's project root. Subprocess/dispatch children
+             inherit it.
     """
     engine = _get_engine()
-    return engine.start(name, parameters, session_id=_session_id)
+    return engine.start(name, parameters, session_id=_session_id, cwd=cwd)
 
 
 @mcp.tool()
@@ -379,6 +388,30 @@ async def process_migrate(instance_id: str) -> dict[str, Any]:
     """
     engine = _get_engine()
     return engine.migrate(instance_id)
+
+
+@mcp.tool()
+async def process_gc(
+    older_than_days: int | None = None, dry_run: bool = False
+) -> dict[str, Any]:
+    """Abandon active process instances that have gone stale.
+
+    Collects instances idle longer than the registry's
+    settings.stale_after_days (default 14; override with older_than_days,
+    which must be positive). Waiting instances and suspended parents are
+    never collected. Use dry_run=true to preview what would be abandoned
+    without moving anything.
+
+    Args:
+        older_than_days: Override the staleness threshold in days (> 0).
+        dry_run: If true, report candidates without abandoning them.
+    """
+    from turnstile_core.admin import gc_stale_instances
+
+    engine = _get_engine()
+    return gc_stale_instances(
+        engine.project_root, older_than_days=older_than_days, dry_run=dry_run
+    )
 
 
 @mcp.tool()

@@ -76,6 +76,10 @@ class ProcessInstance(BaseModel):
     started_at: str
     updated_at: str
     started_by: str = ""
+    # Directory where the instance's work happens (e.g. a git worktree).
+    # Gate and action commands run here; empty means the engine's project
+    # root (the behavior before this field existed).
+    project_dir: str = ""
     history: list[HistoryEntry] = Field(default_factory=list)
     overrides: list[OverrideEntry] = Field(default_factory=list)
     status: str = "active"  # active, completed, abandoned
@@ -190,6 +194,7 @@ class StateStore:
         definition_hash: str = "",
         parameters: dict[str, str] | None = None,
         started_by: str = "",
+        project_dir: str = "",
     ) -> ProcessInstance:
         """Create a new process instance and persist it."""
         instance_id = _generate_id()
@@ -204,6 +209,7 @@ class StateStore:
             started_at=now,
             updated_at=now,
             started_by=started_by,
+            project_dir=project_dir,
         )
         self._write(instance)
         self.append_log(

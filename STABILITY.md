@@ -52,7 +52,7 @@ These ship and work, but may evolve before 1.0. Breaking changes are possible wi
 
 **Multi-actor primitives**
 - `role` on states and in history entries
-- `agent_context` (`guidance`, `reference_files`, `tools`, `skill_directives`)
+- `agent_context` (`guidance`, `reference_files`, `tools`, `skill_directives`, and the agent-designation fields `agent`, `model`, `fresh_context`)
 - Session tracking on history entries (`session_id`)
 - `process_handoff` semantics
 - `required_metadata` declarations on states
@@ -62,6 +62,10 @@ These ship and work, but may evolve before 1.0. Breaking changes are possible wi
 - `add_states`, `patch_states`, `parameters.append` operations under `overrides`
 
 **Other**
+- Stale-instance handling: `settings.stale_after_days`, the guard's stale
+  collapse, `turnstile gc`, and the `process_gc` MCP tool
+- Per-instance work directory: `cwd` on `process_start`, the `project_dir`
+  instance field, and its inheritance by subprocess/dispatch children
 - `process_migrate` and definition-hash-based migration prompts
 - `process_analytics` and the analytics output shape
 - `process_reload_definitions` MCP tool

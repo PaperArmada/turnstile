@@ -210,11 +210,20 @@ class AgentContext(BaseModel):
     Surfaced in MCP responses so the agent runtime can configure itself.
     The engine does not enforce these; they are advisory. The process
     definition carries the expertise; the agent absorbs it on entry.
+
+    ``agent`` names a specific (custom) agent the state designates for its
+    work — e.g. a state whose work should be delegated to a fresh-context
+    specialist rather than done inline. ``model`` optionally pins the model
+    that agent should run on, and ``fresh_context`` marks that the agent
+    must be launched without the calling session's conversational context.
     """
 
     guidance: str = ""
     reference_files: list[str] = Field(default_factory=list)
     tools: list[str] = Field(default_factory=list)
+    agent: str = ""
+    model: str = ""
+    fresh_context: bool = False
 
 
 class StatePermissions(BaseModel):
@@ -465,6 +474,10 @@ class RegistrySettings(BaseModel):
     notifications: dict[str, str] = Field(default_factory=dict)
     enforcement: str = "off"  # off, monitor, enforce
     path_catalogue: dict[str, list[str]] = Field(default_factory=dict)
+    # Days of inactivity after which an active instance is considered stale:
+    # the guard collapses it to a one-line summary instead of a full context
+    # block, and `turnstile gc` / process_gc will abandon it. 0 disables both.
+    stale_after_days: int = 14
 
     @model_validator(mode="after")
     def _validate_enforcement(self) -> RegistrySettings:
@@ -472,6 +485,10 @@ class RegistrySettings(BaseModel):
             raise ValueError(
                 f"enforcement must be 'off', 'monitor', or 'enforce', "
                 f"got '{self.enforcement}'"
+            )
+        if self.stale_after_days < 0:
+            raise ValueError(
+                f"stale_after_days must be >= 0, got {self.stale_after_days}"
             )
         return self
 

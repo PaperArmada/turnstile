@@ -7,6 +7,43 @@ described in [STABILITY.md](STABILITY.md).
 
 ## [Unreleased]
 
+### Added
+
+- **Stale-instance collapse and gc.** Active instances idle past
+  `settings.stale_after_days` (default 14; 0 disables) are collapsed by
+  the guard into a one-line inventory instead of full per-instance
+  context blocks, ending the wall of months-old "STALE" warnings on
+  every guarded edit in a long-lived checkout. Their permissions still
+  apply — a deny attributed to a stale instance now recommends resuming
+  or cleaning it up rather than "transition first" — and when every
+  instance is stale the least-idle one still renders in full so the
+  guidance keeps its post-compaction anchor. Waiting instances are
+  exempt, as are suspended parents (whose `updated_at` freezes at
+  suspension while the child advances). The new `turnstile gc`
+  command / `process_gc` MCP tool abandons stale instances (archived
+  under `.process-state/abandoned/`, never deleted) through
+  `Engine.abandon`, so each collection emits an `abandon` event to the
+  stream, re-checking each candidate immediately before acting so a
+  concurrent transition rescues it; `--dry-run` / `dry_run` previews and
+  `--older-than-days` (positive) overrides the threshold.
+- **Per-instance work directory.** `process_start` accepts `cwd`
+  (engine `start(cwd=...)`): the directory — typically a git worktree —
+  where the instance's work happens. Gate validations and actions for
+  that instance run there instead of the engine's project root, fixing
+  gates that ran `git diff`/tests against the main checkout while the
+  work lived in a worktree. Must be an existing absolute directory
+  (rejected otherwise, so a typo cannot silently fall back to the wrong
+  directory). Recorded on the instance as `project_dir`, inherited by
+  subprocess/dispatch children, reported by `process_status` in both
+  the by-id and list shapes, and falling back to the project root only
+  if the recorded directory later disappears.
+- **Agent designation on states.** `agent_context` gains `agent`,
+  `model`, and `fresh_context`: a state can name the (custom) agent its
+  work is designated for, optionally pinning a model and requiring
+  fresh context. Advisory, like the rest of `agent_context` — surfaced
+  in `process_transition`/`process_status` responses and as a line in
+  the guard's guidance.
+
 ### Fixed
 
 - **Unwritable log.txt no longer aborts state operations** — the log is

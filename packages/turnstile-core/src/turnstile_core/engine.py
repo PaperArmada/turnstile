@@ -358,8 +358,14 @@ class Engine:
         name: str,
         parameters: dict[str, str] | None = None,
         session_id: str = "",
+        cwd: str | None = None,
     ) -> dict[str, Any]:
-        """Start a new process instance."""
+        """Start a new process instance.
+
+        ``cwd`` records where the instance's work happens (e.g. a git
+        worktree); gate and action commands for this instance run there
+        instead of the engine's project root. Defaults to the project root.
+        """
         defn, def_hash = self._get_definition(name)
         params = parameters or {}
 
@@ -373,12 +379,30 @@ class Engine:
                 params[p.name] = p.default
 
         initial = defn.initial_state()
+        work_dir = ""
+        if cwd:
+            # Reject rather than fall back: a typo'd or relative cwd that
+            # silently degraded to the project root would reproduce the
+            # exact wrong-directory gate runs this parameter exists to fix,
+            # while status output claimed otherwise. Relative paths would
+            # resolve against the engine process's cwd, not the caller's.
+            cwd_path = Path(cwd)
+            if not cwd_path.is_absolute():
+                raise ValueError(
+                    f"cwd must be an absolute path, got '{cwd}'"
+                )
+            if not cwd_path.is_dir():
+                raise ValueError(
+                    f"cwd is not an existing directory: '{cwd}'"
+                )
+            work_dir = str(cwd_path.resolve())
         instance = self._store.create(
             process_name=defn.name,
             initial_state=initial.id,
             version=defn.version,
             definition_hash=def_hash,
             parameters=params,
+            project_dir=work_dir,
         )
         self._emit(
             "started",
@@ -394,13 +418,16 @@ class Engine:
         )
         self._store.save(instance)
 
-        return {
+        response = {
             "instance_id": instance.instance_id,
             "process_name": instance.process_name,
             "current_state": instance.current_state,
             "available_transitions": initial.transitions,
             "parameters": instance.parameters,
         }
+        if instance.project_dir:
+            response["project_dir"] = instance.project_dir
+        return response
 
     def status(
         self, instance_id: str | None = None
@@ -424,6 +451,12 @@ class Engine:
                 "history_length": len(instance.history),
                 "suspended": instance.suspended,
             }
+            if instance.project_dir:
+                info["project_dir"] = instance.project_dir
+            if state and state.role:
+                info["role"] = state.role
+            if state and state.agent_context:
+                info["agent_context"] = state.agent_context.model_dump()
             if state and state.required_metadata:
                 info["required_metadata"] = [
                     {"key": rm.key, "description": rm.description}
@@ -456,6 +489,8 @@ class Engine:
                 "updated_at": inst.updated_at,
                 "suspended": inst.suspended,
             }
+            if inst.project_dir:
+                entry["project_dir"] = inst.project_dir
             if inst.suspended:
                 entry["child_instance_id"] = inst.child_instance_id
             if inst.parent_instance_id:
@@ -487,8 +522,25 @@ class Engine:
         params["instance_id"] = instance.instance_id
         return params
 
+    def _work_dir(self, instance: ProcessInstance) -> Path:
+        """Directory where this instance's gate/action commands run.
+
+        The directory recorded at start (e.g. a git worktree) when it still
+        exists, else the engine's project root. Without this, an instance
+        started in a worktree had its `git diff`/test gates run against the
+        main checkout, failing on state the worktree actually satisfies.
+        """
+        if instance.project_dir:
+            recorded = Path(instance.project_dir)
+            if recorded.is_dir():
+                return recorded
+        return self.project_root
+
     async def _run_exit_gates(
-        self, state: ProcessState, validation_params: dict[str, str],
+        self,
+        state: ProcessState,
+        validation_params: dict[str, str],
+        work_dir: Path | None = None,
     ) -> tuple[list[ValidationResult], bool]:
         """Run a state's on_exit validations.
 
@@ -499,18 +551,23 @@ class Engine:
         if not (state.on_exit and state.on_exit.validations):
             return [], False
         results = await run_validations(
-            state.on_exit.validations, validation_params, self.project_root,
+            state.on_exit.validations, validation_params,
+            work_dir or self.project_root,
         )
         return results, has_blocking_failures(results)
 
     async def _run_enter_gates(
-        self, state: ProcessState, validation_params: dict[str, str],
+        self,
+        state: ProcessState,
+        validation_params: dict[str, str],
+        work_dir: Path | None = None,
     ) -> tuple[list[ValidationResult], bool]:
         """Run a state's on_enter validations. See _run_exit_gates."""
         if not (state.on_enter and state.on_enter.validations):
             return [], False
         results = await run_validations(
-            state.on_enter.validations, validation_params, self.project_root,
+            state.on_enter.validations, validation_params,
+            work_dir or self.project_root,
         )
         return results, has_blocking_failures(results)
 
@@ -550,7 +607,7 @@ class Engine:
             error = ""
             try:
                 output, exit_code = await run_command(
-                    action.command, self.project_root, timeout=60,
+                    action.command, self._work_dir(instance), timeout=60,
                     parameters=validation_params, merge_stderr=True,
                 )
             except (TimeoutError, OSError, ValueError) as exc:
@@ -961,7 +1018,7 @@ class Engine:
 
         # Run on_exit validations for current state
         exit_results, exit_blocked = await self._run_exit_gates(
-            current, validation_params
+            current, validation_params, work_dir=self._work_dir(instance)
         )
         all_results.extend(exit_results)
         if exit_blocked:
@@ -980,7 +1037,7 @@ class Engine:
 
         # Run on_enter validations for target state
         enter_results, enter_blocked = await self._run_enter_gates(
-            target, validation_params
+            target, validation_params, work_dir=self._work_dir(instance)
         )
         all_results.extend(enter_results)
         if enter_blocked:
@@ -1047,6 +1104,10 @@ class Engine:
             version=child_defn.version,
             definition_hash=child_hash,
             parameters=child_params,
+            # Delegated work happens where the parent's work happens: a
+            # parent started in a worktree must not have its child's gates
+            # run against the engine's project root.
+            project_dir=parent.project_dir,
         )
 
         # Link parent and child
@@ -1121,6 +1182,7 @@ class Engine:
             version=child_defn.version,
             definition_hash=child_hash,
             parameters=child_params,
+            project_dir=parent.project_dir,
         )
 
         # Link child to parent (but don't suspend parent)
@@ -1385,13 +1447,14 @@ class Engine:
             validation_params = self._gate_params(instance, defn)
             gate_results: list[ValidationResult] = []
             exit_results, exit_blocked = await self._run_exit_gates(
-                current, validation_params
+                current, validation_params, work_dir=self._work_dir(instance)
             )
             gate_results.extend(exit_results)
             blocked_by = "on_exit" if exit_blocked else ""
             if not exit_blocked and target is not None:
                 enter_results, enter_blocked = await self._run_enter_gates(
-                    target, validation_params
+                    target, validation_params,
+                    work_dir=self._work_dir(instance),
                 )
                 gate_results.extend(enter_results)
                 if enter_blocked:

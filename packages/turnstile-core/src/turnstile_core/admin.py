@@ -1,7 +1,8 @@
-"""Admin tools: graph generation, dry run, diffing."""
+"""Admin tools: graph generation, dry run, diffing, stale-instance gc."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from turnstile_core.models import (
@@ -365,3 +366,111 @@ def _diff_summary(
     if transition_changes:
         parts.append(f"{len(transition_changes)} transition change(s)")
     return "; ".join(parts) if parts else "no changes"
+
+
+# ---------------------------------------------------------------------------
+# Stale-instance garbage collection
+# ---------------------------------------------------------------------------
+
+
+def gc_stale_instances(
+    project_root: Path,
+    older_than_days: int | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Abandon active instances idle longer than the staleness threshold.
+
+    The threshold defaults to the registry's ``settings.stale_after_days``
+    (the same one the guard uses to collapse stale instances in its
+    guidance; both sides derive age from
+    ``enforcement.instance_age_days``). Pass ``older_than_days`` to
+    override; the override must be positive. A configured threshold of 0
+    disables gc entirely.
+
+    Never collected:
+
+    - **Waiting** instances: wait states are long-lived by design.
+    - **Suspended** parents: a parent's ``updated_at`` freezes at
+      suspension while its child keeps advancing, so a suspended parent
+      goes "stale" precisely while its child is actively worked;
+      collecting it would sever a live pipeline.
+
+    Abandonment goes through ``Engine.abandon`` so each collection emits
+    an ``abandon`` event to the instance's event stream, and each
+    candidate is re-loaded and re-checked immediately before abandoning
+    so a transition that lands between scan and collection rescues the
+    instance instead of being clobbered by the stale snapshot.
+
+    With ``dry_run`` nothing is moved; the return value lists what a real
+    run would abandon.
+    """
+    from turnstile_core.enforcement import instance_age_days
+    from turnstile_core.engine import Engine
+    from turnstile_core.errors import InstanceNotFoundError
+
+    result: dict[str, Any] = {
+        "dry_run": dry_run,
+        "scanned": 0,
+        "skipped_waiting": 0,
+        "skipped_suspended": 0,
+        "abandoned": [],
+    }
+    if older_than_days is not None and older_than_days <= 0:
+        result["threshold_days"] = older_than_days
+        result["message"] = (
+            f"older_than_days must be positive, got {older_than_days}; "
+            "nothing collected. (To disable staleness entirely, set "
+            "settings.stale_after_days: 0 in registry.yaml.)"
+        )
+        return result
+
+    engine = Engine(Path(project_root))
+    threshold = (
+        older_than_days
+        if older_than_days is not None
+        else engine.registry.settings.stale_after_days
+    )
+    result["threshold_days"] = threshold
+    if threshold <= 0:
+        result["message"] = (
+            "Staleness threshold is 0 (disabled); nothing collected."
+        )
+        return result
+
+    active = engine._store.list_active()
+    result["scanned"] = len(active)
+
+    for instance in active:
+        if instance.waiting:
+            result["skipped_waiting"] += 1
+            continue
+        if instance.suspended:
+            result["skipped_suspended"] += 1
+            continue
+        age = instance_age_days(instance.updated_at)
+        if age < threshold:
+            continue
+        if not dry_run:
+            # Re-load and re-check right before acting: the scan above is
+            # a snapshot, and a concurrent transition must rescue the
+            # instance rather than be overwritten by stale in-memory data.
+            try:
+                current = engine._store.load(instance.instance_id)
+            except InstanceNotFoundError:
+                continue
+            age = instance_age_days(current.updated_at)
+            if age < threshold or current.waiting or current.suspended:
+                continue
+            engine.abandon(
+                instance.instance_id,
+                f"gc: idle {age}d (threshold {threshold}d)",
+            )
+        result["abandoned"].append(
+            {
+                "instance_id": instance.instance_id,
+                "process_name": instance.process_name,
+                "current_state": instance.current_state,
+                "age_days": age,
+            }
+        )
+    return result

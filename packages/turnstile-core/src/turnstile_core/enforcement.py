@@ -15,6 +15,7 @@ state and process definitions but never modifies them.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from fnmatch import fnmatch
@@ -46,6 +47,9 @@ class EnforcementContext:
     role: str = ""
     agent_context_summary: str = ""
     staleness_hint: str = ""
+    agent_hint: str = ""
+    stale: bool = False
+    age_days: int = 0
 
 
 @dataclass
@@ -82,6 +86,7 @@ def _unknown_state_result(
 def _build_context(
     instance: ProcessInstance,
     definitions: dict[str, ProcessDefinition],
+    stale_after_days: int,
 ) -> EnforcementContext:
     """Build enforcement context for a single active instance."""
     defn = definitions.get(instance.process_name)
@@ -90,6 +95,7 @@ def _build_context(
     permissions = StatePermissions()  # default: permissive
     role = ""
     agent_context_summary = ""
+    agent_hint = ""
 
     if defn:
         state_map = {s.id: s for s in defn.states}
@@ -118,6 +124,17 @@ def _build_context(
                         + ", ".join(state_obj.agent_context.tools)
                     )
                 agent_context_summary = "\n".join(parts)
+                if state_obj.agent_context.agent:
+                    details = []
+                    if state_obj.agent_context.model:
+                        details.append(f"model: {state_obj.agent_context.model}")
+                    if state_obj.agent_context.fresh_context:
+                        details.append("fresh context")
+                    suffix = f" ({', '.join(details)})" if details else ""
+                    agent_hint = (
+                        f"  This state's work is designated for the "
+                        f"'{state_obj.agent_context.agent}' agent{suffix}."
+                    )
 
     waiting_for = ""
     if instance.waiting and defn:
@@ -125,6 +142,9 @@ def _build_context(
         state_obj = state_map.get(instance.current_state)
         if state_obj and state_obj.signal:
             waiting_for = state_obj.signal.name
+
+    age_days = instance_age_days(instance.updated_at)
+    stale = bool(stale_after_days) and age_days >= stale_after_days
 
     return EnforcementContext(
         instance_id=instance.instance_id,
@@ -139,7 +159,33 @@ def _build_context(
         role=role,
         agent_context_summary=agent_context_summary,
         staleness_hint=_staleness_hint(instance.updated_at),
+        agent_hint=agent_hint,
+        stale=stale,
+        age_days=age_days,
     )
+
+
+def instance_age_days(updated_at: str) -> int:
+    """Whole days since ``updated_at``; 0 if the timestamp is unparseable.
+
+    Public because gc (admin.gc_stale_instances) must agree with the guard
+    on what "stale" means; both derive it from this one function.
+
+    Failing to 0 (fresh) is the safe direction: an unparseable or naive
+    timestamp makes the instance immune to collapse and gc rather than
+    silently collected, but that immunity is invisible, so it is logged.
+    """
+    try:
+        updated = datetime.fromisoformat(updated_at)
+        age = datetime.now(timezone.utc) - updated
+        return max(0, int(age.total_seconds() // 86400))
+    except (ValueError, TypeError):
+        logging.getLogger(__name__).warning(
+            "Unparseable instance timestamp %r; treating age as 0 "
+            "(instance will never be considered stale)",
+            updated_at,
+        )
+        return 0
 
 
 def _staleness_hint(updated_at: str) -> str:
@@ -159,21 +205,48 @@ def _staleness_hint(updated_at: str) -> str:
     return ""
 
 
-def _format_guidance(contexts: list[EnforcementContext], action: str) -> str:
+def _format_guidance(
+    contexts: list[EnforcementContext],
+    action: str,
+    stale_after_days: int,
+) -> str:
     """Generate assertive state guidance for the agent.
 
     Uses declarative framing ('You are in: ...') rather than passive
     status lines so the output overrides stale mental models after
     compaction or session restart.
+
+    Instances idle past ``stale_after_days`` are collapsed to a one-line
+    inventory instead of full context blocks: an abandoned checkout can
+    accumulate months-old instances, and repeating their full state on
+    every guarded action buries the live one. Their permissions still
+    apply (collapse changes rendering, never enforcement); waiting
+    instances are exempt because wait states are long-lived by design.
+    When EVERY instance is stale, the least-idle one is still rendered in
+    full: guidance whose only content is "everything is stale" would strip
+    the post-compaction reassertion this function exists to provide.
     """
     if not contexts:
         return ""
 
     non_suspended = [c for c in contexts if not c.suspended]
     suspended = [c for c in contexts if c.suspended]
+    stale = [c for c in non_suspended if c.stale and not c.waiting]
+
+    promoted_ids: set[str] = set()
+    if stale and len(stale) == len(non_suspended):
+        promoted = min(stale, key=lambda c: c.age_days)
+        promoted_ids = {promoted.instance_id}
+        stale = [c for c in stale if c.instance_id != promoted.instance_id]
 
     lines = []
     for ctx in non_suspended:
+        if (
+            ctx.stale
+            and not ctx.waiting
+            and ctx.instance_id not in promoted_ids
+        ):
+            continue
         lines.append(
             f"You are in: {ctx.process_name} @ {ctx.current_state} "
             f"(instance {ctx.instance_id})"
@@ -186,8 +259,26 @@ def _format_guidance(contexts: list[EnforcementContext], action: str) -> str:
             )
         if ctx.role:
             lines.append(f"  Role: {ctx.role}")
+        if ctx.agent_hint:
+            lines.append(ctx.agent_hint)
         if ctx.staleness_hint:
             lines.append(ctx.staleness_hint)
+
+    if stale:
+        inventory = "; ".join(
+            f"{c.process_name} @ {c.current_state} "
+            f"({c.instance_id}, idle {c.age_days}d)"
+            for c in stale
+        )
+        lines.append(
+            f"Stale (idle >= {stale_after_days}d, details suppressed): "
+            f"{inventory}"
+        )
+        lines.append(
+            "  Resume one by transitioning it, or clean up with "
+            "process_abandon(<id>, <reason>) / `turnstile gc` "
+            "(preview with --dry-run)."
+        )
 
     waiting = [c for c in contexts if c.waiting]
     if waiting:
@@ -455,8 +546,12 @@ def _evaluate_active_enforcement(
             "then retry.",
         )
 
-    contexts = [_build_context(inst, definitions) for inst in active]
-    guidance = _format_guidance(contexts, action)
+    stale_after_days = registry.settings.stale_after_days
+    contexts = [
+        _build_context(inst, definitions, stale_after_days)
+        for inst in active
+    ]
+    guidance = _format_guidance(contexts, action, stale_after_days)
 
     # Check permissions: find any non-suspended instance that allows the action
     non_suspended = [c for c in contexts if not c.suspended]
@@ -487,7 +582,17 @@ def _evaluate_active_enforcement(
         blocked_ctx = denied_by[0]
         edit_states = [t for t in blocked_ctx.available_transitions]
         suggestion = ""
-        if edit_states:
+        if blocked_ctx.stale:
+            # Advising the user to advance a months-dead process would be
+            # wrong; a stale blocker should be resumed deliberately or
+            # cleaned up, not transitioned past to unblock an edit.
+            suggestion = (
+                f" This instance is stale (idle {blocked_ctx.age_days}d): "
+                f"resume it deliberately, or clean it up with "
+                f"process_abandon('{blocked_ctx.instance_id}', <reason>) / "
+                f"`turnstile gc`."
+            )
+        elif edit_states:
             suggestion = (
                 f" Transition to a state that allows edits first: "
                 f"{', '.join(edit_states)}"

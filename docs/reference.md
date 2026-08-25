@@ -148,12 +148,13 @@ states:
 |------|---------|
 | `process_list` | Show available process definitions |
 | `process_info` | Show a definition's parameters, states, and gates |
-| `process_start` | Start a new process instance |
+| `process_start` | Start a new process instance (optional `cwd`: the worktree/directory where its gate and action commands run) |
 | `process_status` | Check active instances and their current state |
 | `process_transition` | Move to the next state (runs validation gates) |
 | `process_signal` | Deliver a signal to a waiting instance |
 | `process_skip` | Force-skip a state with a logged reason |
 | `process_abandon` | Abandon a process instance |
+| `process_gc` | Abandon instances idle past `settings.stale_after_days` (never waiting/suspended ones; `dry_run` previews) |
 | `process_undo` | Revert the last transition |
 | `process_handoff` | Transfer ownership (metadata) |
 | `process_history` | View full transition history |
@@ -177,6 +178,11 @@ turnstile validate .processes/feature-deploy.yaml
 
 # List available processes
 turnstile list
+
+# Abandon instances idle past settings.stale_after_days (default 14).
+# Waiting instances and suspended parents are never collected.
+turnstile gc --dry-run   # preview
+turnstile gc             # collect
 
 # Show active instances
 turnstile status
@@ -251,6 +257,10 @@ settings:
   state_dir: .process-state
   require_override_reason: true
   log_retention_days: 90
+  # Days of inactivity before an instance is considered stale: the guard
+  # collapses it to a one-line summary and `turnstile gc` will collect it.
+  # 0 disables both. Default 14.
+  stale_after_days: 14
   notifications:
     # ${var} references are expanded by the shell from environment variables:
     # name, instance_id, state (on_complete); step, user, reason (on_override).
