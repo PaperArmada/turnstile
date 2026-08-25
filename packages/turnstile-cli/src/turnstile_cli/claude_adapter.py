@@ -174,7 +174,7 @@ def run_guard() -> None:
 # ---------------------------------------------------------------------------
 
 
-TURNSTILE_REF = "v0.1.3"
+TURNSTILE_REF = "v0.1.4"
 
 
 def pin_repo_url(repo_url: str, ref: str = TURNSTILE_REF) -> str:

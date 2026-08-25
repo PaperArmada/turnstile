@@ -7,6 +7,8 @@ described in [STABILITY.md](STABILITY.md).
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-08-25
+
 ### Added
 
 - **Stale-instance collapse and gc.** Active instances idle past

@@ -10,7 +10,7 @@ Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/). From your project
 directory:
 
 ```bash
-uvx --python 3.12 --from "turnstile-cli @ git+https://github.com/PaperArmada/turnstile.git@v0.1.3#subdirectory=packages/turnstile-cli" turnstile init
+uvx --python 3.12 --from "turnstile-cli @ git+https://github.com/PaperArmada/turnstile.git@v0.1.4#subdirectory=packages/turnstile-cli" turnstile init
 ```
 
 This generates:
@@ -38,7 +38,7 @@ Two things to know before you restart:
   it:
 
   ```bash
-  alias turnstile='uvx --python 3.12 --from "turnstile-cli @ git+https://github.com/PaperArmada/turnstile.git@v0.1.3#subdirectory=packages/turnstile-cli" turnstile'
+  alias turnstile='uvx --python 3.12 --from "turnstile-cli @ git+https://github.com/PaperArmada/turnstile.git@v0.1.4#subdirectory=packages/turnstile-cli" turnstile'
   ```
 
 Restart Claude Code and the process tools are available.
@@ -161,7 +161,7 @@ prompts, split by the restart the MCP connection needs.
 Set up turnstile (https://github.com/PaperArmada/turnstile) in this project:
 
 1. Run:
-   uvx --python 3.12 --from "turnstile-cli @ git+https://github.com/PaperArmada/turnstile.git@v0.1.3#subdirectory=packages/turnstile-cli" turnstile init
+   uvx --python 3.12 --from "turnstile-cli @ git+https://github.com/PaperArmada/turnstile.git@v0.1.4#subdirectory=packages/turnstile-cli" turnstile init
 2. Add the Process Enforcement guidance block it prints to this project's
    CLAUDE.md.
 3. Summarize what was generated and anything the init output warned about.
