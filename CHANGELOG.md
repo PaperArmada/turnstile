@@ -7,6 +7,25 @@ described in [STABILITY.md](STABILITY.md).
 
 ## [Unreleased]
 
+### Added
+
+- **`turnstile-feedback` starter process.** Closes the feedback loop:
+  capture -> file for reporting Turnstile bugs and friction on the public
+  tracker. The file state treats filing as publication (resolve every
+  redaction flag, present the exact final body for explicit user approval,
+  never file as a side effect of a transition) and gates entry on report
+  presence, the `scripts/redaction-check` pre-screen (generic
+  home-path/email/credential patterns plus an optional per-project
+  denylist at `.processes/feedback-denylist.txt`; the gate degrades to a
+  self-explaining warning when the script is not installed, since
+  `turnstile init` ships YAML definitions only), and the report path being
+  untracked by git.
+- **GitHub issue forms.** The markdown bug-report and process-definition
+  templates are replaced by issue forms, plus a new feedback/friction
+  form. Every form ends in a required disclosure checkbox (evidence is
+  synthetic or reviewed for private/identifying content), and blank
+  issues are disabled so no filing path skips a form.
+
 ## [0.1.4] - 2026-08-25
 
 ### Added

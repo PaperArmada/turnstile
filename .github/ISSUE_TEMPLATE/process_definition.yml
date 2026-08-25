@@ -1,0 +1,63 @@
+name: Process definition
+description: Propose a new process definition for the starter pack or examples
+labels: [process-definition]
+body:
+  - type: textarea
+    id: workflow
+    attributes:
+      label: What workflow does this process capture?
+      description: One paragraph. Who runs it, and what does "done" mean?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: destination
+    attributes:
+      label: Where should it live?
+      options:
+        - .processes/ starter pack (broadly useful in any project; held to docs/principles/)
+        - examples/ (showcases a specific engine feature or domain)
+    validations:
+      required: true
+
+  - type: textarea
+    id: definition
+    attributes:
+      label: Definition
+      description: The process YAML.
+      render: yaml
+    validations:
+      required: true
+
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation
+      description: |-
+        Output of:
+          turnstile validate <file>.yaml
+          turnstile dry-run <file>.yaml
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: usage
+    attributes:
+      label: Has it been used?
+      description: >-
+        Optional but persuasive: how many instances have you run through it,
+        and what did you learn?
+
+  - type: checkboxes
+    id: disclosure
+    attributes:
+      label: Disclosure review
+      description: This issue tracker is public.
+      options:
+        - label: >-
+            The definition and examples above contain no private or
+            identifying content (project names, hostnames, home-directory
+            paths, real parameter values, tokens) and I am authorized to
+            publish them.
+          required: true

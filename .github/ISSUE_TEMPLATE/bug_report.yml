@@ -1,0 +1,85 @@
+name: Bug report
+description: Report a defect in the engine, guard hook, CLI, or MCP server
+labels: [bug]
+body:
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      description: Where did the problem show up?
+      options:
+        - Guard hook
+        - MCP server
+        - CLI
+        - Engine / library
+        - Process definition or validation
+        - Docs
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Turnstile version
+      description: The tag or commit you have installed (e.g. v0.1.4)
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: >-
+        The observed behavior, with the engine response, error output, or JSON
+        verbatim. Keep observations here; put interpretation in "Expected
+        instead".
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected instead
+      description: What you expected to happen, and why (docs, prior behavior, or reasoning).
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: >-
+        Minimal steps. Best form: a small process YAML with placeholder
+        parameters in a temp project, plus the sequence of commands or tool
+        calls that triggers the bug. A synthetic repro is both safer to share
+        and easier to act on than excerpts of your real project state.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Additional evidence
+      description: >-
+        Optional. Relevant lines from .process-state/events.jsonl, guard
+        output, or logs — included line by line, reviewed before pasting, not
+        dumped wholesale.
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: "Interface and platform, e.g.: MCP (Claude Code) / Ubuntu 24.04 / Python 3.12"
+
+  - type: checkboxes
+    id: disclosure
+    attributes:
+      label: Disclosure review
+      description: This issue tracker is public.
+      options:
+        - label: >-
+            The evidence above is from a synthetic reproduction, or I have
+            reviewed it for private or identifying content (project names,
+            hostnames, home-directory paths, real parameter values, tokens)
+            and I am authorized to publish it.
+          required: true

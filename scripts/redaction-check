@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Redaction check for feedback reports bound for a PUBLIC issue tracker
+# (used by the turnstile-feedback process; generic tool from the Turnstile
+# starter pack). Scans a drafted report for environment paths, email
+# addresses, credential shapes, and any project-specific terms listed in
+# .processes/feedback-denylist.txt (one grep -E pattern per line, # comments
+# and blank lines ignored; resolved relative to the working directory the
+# gate runs in).
+#
+# Prints each hit, then a final verdict token: REDACTION-CLEAN or
+# REDACTION-FLAGGED. Gate on the token with expect ends_with(). This is a
+# mechanical assist against known patterns only: a clean pass does NOT
+# replace the human review and explicit user approval required before
+# filing.
+set -u
+
+file="${1:?usage: redaction-check <report-file>}"
+denylist=".processes/feedback-denylist.txt"
+
+if [ ! -r "$file" ]; then
+    echo "cannot read: $file"
+    echo "REDACTION-FLAGGED (unreadable input)"
+    exit 0
+fi
+
+flags=0
+check() {
+    local label="$1"
+    shift
+    local hits count
+    hits=$(grep -n "$@" -- "$file" 2>/dev/null)
+    if [ -n "$hits" ]; then
+        count=$(printf '%s\n' "$hits" | wc -l)
+        echo "FLAGGED ($label):"
+        printf '%s\n' "$hits" | head -5 | sed 's/^/  /'
+        # The display is capped; the verdict below counts every hit.
+        if [ "$count" -gt 5 ]; then
+            echo "  ... ($count matching lines total; first 5 shown)"
+        fi
+        flags=$((flags + 1))
+    fi
+}
+
+# Project-specific terms (names, hosts, handles) from the local denylist.
+# Strip CR so a CRLF checkout cannot silently break every pattern, and warn
+# when the file resolves to zero patterns (grep -f with an empty pattern
+# list matches nothing, which would look identical to a clean report).
+if [ -f "$denylist" ]; then
+    patterns=$(grep -vE '^[[:space:]]*(#|$)' -- "$denylist" | tr -d '\r')
+    if [ -n "$patterns" ]; then
+        check "project denylist" -iEf <(printf '%s\n' "$patterns")
+    else
+        echo "note: $denylist contains no active patterns; only generic patterns checked"
+    fi
+else
+    echo "note: no $denylist found; only generic patterns checked"
+fi
+# Environment identifiers (Linux, macOS, and Windows home paths)
+check "user home path" -E '/(home|Users)/[A-Za-z0-9_.-]+|[A-Za-z]:\\Users\\'
+check "email address" -E '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
+# Credential shapes (known prefixes only; no generic high-entropy match, too noisy)
+check "token/credential" -E 'glpat-|gldt-|[sr]k_(live|test)_[A-Za-z0-9]|whsec_|gh[opsur]_[A-Za-z0-9]|github_pat_|xox[baprs]-|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'
+
+if [ "$flags" -eq 0 ]; then
+    echo "REDACTION-CLEAN"
+else
+    echo "REDACTION-FLAGGED ($flags pattern groups)"
+fi
+exit 0

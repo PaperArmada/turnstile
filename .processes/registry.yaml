@@ -11,6 +11,7 @@ local:
 - decision-record
 - peer-review
 - security-review
+- turnstile-feedback
 settings:
   state_dir: .process-state
   require_override_reason: true

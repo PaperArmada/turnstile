@@ -1,0 +1,71 @@
+name: turnstile-feedback
+description: "Capture structured feedback on Turnstile itself and file it on the public tracker with explicit user approval"
+version: "1.0.0"
+
+metadata:
+  author: "turnstile"
+  tags: ["starter-pack", "meta"]
+
+parameters:
+  - name: summary
+    description: "One-line statement of the bug or friction"
+    required: true
+  - name: surface
+    description: "Where it showed up, matching the issue-form dropdown: guard hook, MCP server, CLI, engine/library, process definition, or docs"
+    required: true
+  - name: report_file
+    description: "Path for the drafted issue body; use a scratch or gitignored location, not a committed one"
+    required: true
+
+states:
+  - id: start
+    type: initial
+    transitions: [capture]
+
+  - id: capture
+    description: >
+      Draft the issue body into ${report_file}, shaped for the matching issue
+      form at github.com/PaperArmada/turnstile (bug report or
+      feedback/friction): surface, Turnstile version, what happened verbatim,
+      expected instead, reproduction, evidence. Evidence rules: prefer a
+      synthetic reproduction in a temp project with placeholder parameters
+      over excerpts of real state; when a real events.jsonl or log excerpt is
+      unavoidable, include it line by line, deliberately, and strip
+      identifying content (project names, hostnames, home paths, real
+      parameter values, tokens).
+    transitions: [file, abandoned]
+
+  - id: file
+    description: >
+      Filing is PUBLICATION: the issue lands on a public tracker readable by
+      anyone. Two hard rules. (1) Resolve every redaction-gate flag: fix the
+      report or justify the flag as a false positive, in writing, to the
+      user. (2) Present the exact final body of ${report_file} to the user
+      and obtain their explicit approval before filing. Never file as a side
+      effect of a transition or batch directive. File with gh issue create
+      --repo PaperArmada/turnstile --body-file "${report_file}" (plus title
+      and label), or paste into the issue form in a browser if gh is not
+      authenticated. Record the issue URL before transitioning to done.
+    transitions: [done, capture, abandoned]
+    on_enter:
+      validate:
+        - command: "test -s \"${report_file}\" && echo present || echo missing"
+          expect: not_equals("missing")
+          message: "Draft the report before entering the filing step"
+          severity: warning
+        - command: "if [ -x scripts/redaction-check ]; then scripts/redaction-check \"${report_file}\"; else echo 'REDACTION-SKIPPED: install scripts/redaction-check from the Turnstile repo'; fi"
+          expect: ends_with("REDACTION-CLEAN")
+          message: "Report contains flagged content (or the redaction pre-screen is not installed); resolve before seeking approval to publish"
+          severity: warning
+        - command: "git ls-files --error-unmatch \"${report_file}\" >/dev/null 2>&1 && echo tracked || echo untracked"
+          expect: not_equals("tracked")
+          message: "report_file points at a git-tracked path; draft in a scratch or gitignored location so the report cannot be committed"
+          severity: warning
+
+  - id: done
+    type: terminal
+    description: "Issue filed publicly with the user's explicit approval; URL recorded"
+
+  - id: abandoned
+    type: terminal
+    description: "Feedback abandoned before filing"

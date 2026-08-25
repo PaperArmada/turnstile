@@ -1,0 +1,76 @@
+name: Feedback / friction
+description: Something works as designed but fights you — a gate that fires at the wrong time, output that misleads, a workflow that takes too many steps
+labels: [feedback]
+body:
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - Guard hook
+        - MCP server
+        - CLI
+        - Engine / library
+        - Process definition or validation
+        - Docs
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Turnstile version
+      description: The tag or commit you have installed (e.g. v0.1.4)
+    validations:
+      required: true
+
+  - type: textarea
+    id: friction
+    attributes:
+      label: What fought you
+      description: >-
+        The concrete moment: what you were doing, what Turnstile did, and what
+        it cost you (extra steps, a wrong conclusion, an interruption). One
+        real occurrence beats a general impression.
+    validations:
+      required: true
+
+  - type: textarea
+    id: wanted
+    attributes:
+      label: What you wanted instead
+      description: The behavior that would have served the same purpose without the cost.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: How often
+      options:
+        - Once so far
+        - Occasionally
+        - Every time I hit this path
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: >-
+        Optional. Verbatim output or events.jsonl lines showing the moment —
+        reviewed before pasting, ideally reproduced with placeholder values.
+
+  - type: checkboxes
+    id: disclosure
+    attributes:
+      label: Disclosure review
+      description: This issue tracker is public.
+      options:
+        - label: >-
+            The evidence above is from a synthetic reproduction, or I have
+            reviewed it for private or identifying content (project names,
+            hostnames, home-directory paths, real parameter values, tokens)
+            and I am authorized to publish it.
+          required: true
