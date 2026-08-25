@@ -42,28 +42,38 @@ check() {
 }
 
 # Project-specific terms (names, hosts, handles) from the local denylist.
-# Strip CR so a CRLF checkout cannot silently break every pattern, and warn
-# when the file resolves to zero patterns (grep -f with an empty pattern
-# list matches nothing, which would look identical to a clean report).
+# Strip CR so a CRLF checkout cannot silently break every pattern. A missing
+# or zero-pattern denylist means project terms were NOT checked, which is a
+# different statement from "no project terms found": the verdict becomes
+# REDACTION-UNVERIFIED (fails the gate) instead of a clean pass, because a
+# run from the wrong working directory would otherwise silently degrade to
+# generic-only. Projects without private terms should still list at least
+# their own name.
+unverified=""
 if [ -f "$denylist" ]; then
     patterns=$(grep -vE '^[[:space:]]*(#|$)' -- "$denylist" | tr -d '\r')
     if [ -n "$patterns" ]; then
         check "project denylist" -iEf <(printf '%s\n' "$patterns")
     else
-        echo "note: $denylist contains no active patterns; only generic patterns checked"
+        unverified="$denylist contains no active patterns"
     fi
 else
-    echo "note: no $denylist found; only generic patterns checked"
+    unverified="no $denylist found"
 fi
-# Environment identifiers (Linux, macOS, and Windows home paths)
-check "user home path" -E '/(home|Users)/[A-Za-z0-9_.-]+|[A-Za-z]:\\Users\\'
+# Environment identifiers (Linux, macOS, and Windows home paths).
+# Case-insensitive on purpose: Windows paths are case-insensitive and tools
+# emit lowercase forms (c:\users\...) routinely. The credential checks below
+# stay case-sensitive by design; -i there would add noise, not coverage.
+check "user home path" -iE '/(home|Users)/[A-Za-z0-9_.-]+|[A-Za-z]:\\Users\\'
 check "email address" -E '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
 # Credential shapes (known prefixes only; no generic high-entropy match, too noisy)
 check "token/credential" -E 'glpat-|gldt-|[sr]k_(live|test)_[A-Za-z0-9]|whsec_|gh[opsur]_[A-Za-z0-9]|github_pat_|xox[baprs]-|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'
 
-if [ "$flags" -eq 0 ]; then
-    echo "REDACTION-CLEAN"
-else
+if [ "$flags" -gt 0 ]; then
     echo "REDACTION-FLAGGED ($flags pattern groups)"
+elif [ -n "$unverified" ]; then
+    echo "REDACTION-UNVERIFIED (project terms not checked: $unverified)"
+else
+    echo "REDACTION-CLEAN"
 fi
 exit 0

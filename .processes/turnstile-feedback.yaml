@@ -55,7 +55,7 @@ states:
           severity: warning
         - command: "if [ -x scripts/redaction-check ]; then scripts/redaction-check \"${report_file}\"; else echo 'REDACTION-SKIPPED: install scripts/redaction-check from the Turnstile repo'; fi"
           expect: ends_with("REDACTION-CLEAN")
-          message: "Report contains flagged content (or the redaction pre-screen is not installed); resolve before seeking approval to publish"
+          message: "Redaction pre-screen did not return clean (flagged content, unverified project terms, or script not installed); resolve before seeking approval to publish"
           severity: warning
         - command: "git ls-files --error-unmatch \"${report_file}\" >/dev/null 2>&1 && echo tracked || echo untracked"
           expect: not_equals("tracked")
