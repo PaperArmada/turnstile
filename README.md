@@ -80,7 +80,7 @@ packages/
   turnstile-core/     # Models, loader, validator, persistence, engine,
                       # analytics, hooks, notifications, inheritance,
                       # registry, schema, template
-  turnstile-mcp/      # MCP server (FastMCP, stdio transport)
+  turnstile-mcp/      # MCP server (mcp 2.x MCPServer, stdio transport)
   turnstile-cli/      # CLI (Click)
 docs/
   quickstart.md       # Step-by-step setup

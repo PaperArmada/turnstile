@@ -7,6 +7,32 @@ described in [STABILITY.md](STABILITY.md).
 
 ## [Unreleased]
 
+### Changed
+
+- **`turnstile-mcp` requires the mcp 2.x SDK.** mcp 1.x is no longer
+  supported. Dev checkouts pick this up on the next `uv sync` (the lock
+  is untracked); uvx installs resolve 2.x already.
+
+### Fixed
+
+- **MCP server import failure on fresh installs (#42).** `turnstile-mcp`
+  declared `mcp>=1.0` with no upper bound; `mcp` 2.0.0 (2026-07-28)
+  removed `mcp.server.fastmcp`, so every `uvx`-based install since then
+  (including the documented v0.1.4 command) died at import with
+  `ModuleNotFoundError`, and Claude Code reported only
+  `CONNECTION_CLOSED`. The server now targets the 2.x SDK (`MCPServer`)
+  and declares its package version to the client; the dependency is
+  `mcp>=2,<3`. The repo's `uv.lock` is untracked, so CI already resolved
+  mcp 2.x and stayed green: `turnstile-mcp` had no tests. A wire-level
+  stdio smoke test (initialize, tools/list, tools/call, and an erroring
+  call) now runs in CI.
+- **Engine error messages survive the mcp 2.x SDK.** mcp 2.x replaces the
+  text of any exception that is not a `ToolError` with a bare
+  `Error executing tool <name>`. Every tool now re-raises engine errors
+  as `ToolError`, so the agent still sees the reason (legal transitions,
+  missing metadata, unknown instance, waiting for a signal) as it did on
+  1.x.
+
 ### Added
 
 - **`turnstile-feedback` starter process.** Closes the feedback loop:

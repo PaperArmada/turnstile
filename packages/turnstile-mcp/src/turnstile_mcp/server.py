@@ -2,15 +2,48 @@
 
 from __future__ import annotations
 
+import functools
+import importlib.metadata
 import logging
 import os
 import uuid
 from pathlib import Path
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 from turnstile_core.engine import Engine
+
+
+def _package_version() -> str:
+    try:
+        return importlib.metadata.version("turnstile-mcp")
+    except importlib.metadata.PackageNotFoundError:
+        return "unknown"
+
+
+def _surface_errors(func):
+    """Re-raise handler exceptions as ToolError so their text reaches the agent.
+
+    mcp 2.x deliberately hides the message of any exception that is not a
+    ToolError: the client sees only "Error executing tool <name>". Engine
+    errors are this server's guidance to the agent (legal transitions,
+    missing metadata, waiting-for-signal, unknown instance), so they must
+    get through, as they did on the 1.x SDK.
+    """
+
+    @functools.wraps(func)
+    async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return await func(*args, **kwargs)
+        except ToolError:
+            raise
+        except Exception as exc:
+            raise ToolError(str(exc)) from exc
+
+    return wrapper
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -20,7 +53,8 @@ logger = logging.getLogger(__name__)
 # transitions made in the same conversation and for concurrency detection.
 _session_id: str = uuid.uuid4().hex[:12]
 
-mcp = FastMCP("turnstile")
+# mcp 2.x reports an empty version to the client unless the server declares one.
+mcp = MCPServer("turnstile", version=_package_version())
 
 # Engine is initialized lazily on first tool call. The project root
 # is determined from TURNSTILE_PROJECT_DIR (if set) or CWD.
@@ -48,6 +82,7 @@ def _get_engine() -> Engine:
 
 
 @mcp.tool()
+@_surface_errors
 async def process_list(reload: bool = False) -> dict[str, Any]:
     """List all available process definitions for this project.
 
@@ -65,6 +100,7 @@ async def process_list(reload: bool = False) -> dict[str, Any]:
 
 
 @mcp.tool()
+@_surface_errors
 async def process_reload_definitions() -> dict[str, Any]:
     """Reload all process definitions from disk.
 
@@ -82,6 +118,7 @@ async def process_reload_definitions() -> dict[str, Any]:
 
 
 @mcp.tool()
+@_surface_errors
 async def process_info(name: str) -> dict[str, Any]:
     """Get detailed information about a process definition.
 
@@ -98,6 +135,7 @@ async def process_info(name: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+@_surface_errors
 async def process_start(
     name: str,
     parameters: dict[str, str] | None = None,
@@ -121,6 +159,7 @@ async def process_start(
 
 
 @mcp.tool()
+@_surface_errors
 async def process_status(
     instance_id: str | None = None,
 ) -> dict[str, Any] | list[dict[str, Any]]:
@@ -136,6 +175,7 @@ async def process_status(
 
 
 @mcp.tool()
+@_surface_errors
 async def process_transition(
     instance_id: str, target_state: str,
     metadata: dict[str, Any] | None = None,
@@ -185,6 +225,7 @@ async def process_transition(
 
 
 @mcp.tool()
+@_surface_errors
 async def process_skip(
     instance_id: str, target_state: str, reason: str
 ) -> dict[str, Any]:
@@ -209,6 +250,7 @@ async def process_skip(
 
 
 @mcp.tool()
+@_surface_errors
 async def process_signal(
     instance_id: str, signal_name: str,
     data: dict[str, Any],
@@ -242,6 +284,7 @@ async def process_signal(
 
 
 @mcp.tool()
+@_surface_errors
 async def process_abandon(
     instance_id: str, reason: str
 ) -> dict[str, Any]:
@@ -258,6 +301,7 @@ async def process_abandon(
 
 
 @mcp.tool()
+@_surface_errors
 async def process_undo(
     instance_id: str, reason: str
 ) -> dict[str, Any]:
@@ -281,6 +325,7 @@ async def process_undo(
 
 
 @mcp.tool()
+@_surface_errors
 async def process_handoff(
     instance_id: str, to_user: str, reason: str
 ) -> dict[str, Any]:
@@ -300,6 +345,7 @@ async def process_handoff(
 
 
 @mcp.tool()
+@_surface_errors
 async def process_history(instance_id: str) -> list[dict[str, Any]]:
     """Get full transition history for a process instance.
 
@@ -311,6 +357,7 @@ async def process_history(instance_id: str) -> list[dict[str, Any]]:
 
 
 @mcp.tool()
+@_surface_errors
 async def process_validate_definition(path: str) -> dict[str, Any]:
     """Validate a process definition YAML file against the schema.
 
@@ -327,6 +374,7 @@ async def process_validate_definition(path: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+@_surface_errors
 async def process_graph(name: str) -> dict[str, Any]:
     """Generate a Mermaid state diagram for a process definition.
 
@@ -341,6 +389,7 @@ async def process_graph(name: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+@_surface_errors
 async def process_dry_run(
     name: str, path: list[str] | None = None
 ) -> list[dict[str, Any]]:
@@ -361,6 +410,7 @@ async def process_dry_run(
 
 
 @mcp.tool()
+@_surface_errors
 async def process_diff(path_a: str, path_b: str) -> dict[str, Any]:
     """Compare two process definition YAML files.
 
@@ -376,6 +426,7 @@ async def process_diff(path_a: str, path_b: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+@_surface_errors
 async def process_migrate(instance_id: str) -> dict[str, Any]:
     """Check if an in-flight process instance needs migration.
 
@@ -391,6 +442,7 @@ async def process_migrate(instance_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+@_surface_errors
 async def process_gc(
     older_than_days: int | None = None, dry_run: bool = False
 ) -> dict[str, Any]:
@@ -415,6 +467,7 @@ async def process_gc(
 
 
 @mcp.tool()
+@_surface_errors
 async def process_analytics() -> dict[str, Any]:
     """Compute process analytics from archived (completed/abandoned) instances.
 
@@ -426,6 +479,7 @@ async def process_analytics() -> dict[str, Any]:
 
 
 @mcp.tool()
+@_surface_errors
 async def process_check_completed(
     name: str,
     state: str | None = None,
