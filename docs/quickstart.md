@@ -22,7 +22,10 @@ This generates:
   automatically; files that fail to load are reported and skipped.
 - `.mcp.json` — MCP server config (uvx, pinned to the release tag)
 - `.claude/settings.json` — the Claude Code guard hook
-- `.gitignore` entries for the machine-specific files
+- `.gitignore` entry for `.process-state/` (runtime state). With `--dev`,
+  `.mcp.json` and `.claude/settings.json` are added too, since they embed
+  the local checkout path; in uvx mode they are portable, so whether to
+  commit them is your call. Paths git already tracks are never added.
 
 Init also prints a **Process Enforcement guidance block**: paste it into your
 project's `CLAUDE.md` so agents know which process to start before editing.

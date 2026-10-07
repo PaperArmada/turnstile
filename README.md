@@ -39,7 +39,7 @@ In your project directory:
 uvx --python 3.12 --from "turnstile-cli @ git+https://github.com/PaperArmada/turnstile.git@v0.1.4#subdirectory=packages/turnstile-cli" turnstile init
 ```
 
-This generates the MCP server config, registry, Claude Code guard hook, and gitignore entries; process definitions already in `.processes/` are registered automatically. Enforcement starts in monitor mode (warnings only; `turnstile enforce off` disables it). Restart Claude Code and the process tools are available.
+This generates the MCP server config, registry, Claude Code guard hook, and a gitignore entry for runtime state; process definitions already in `.processes/` are registered automatically. Enforcement starts in monitor mode (warnings only; `turnstile enforce off` disables it). Restart Claude Code and the process tools are available.
 
 The generated config pins to a release tag (`@v0.1.4`), so installs are reproducible. To upgrade, bump the tag in `.mcp.json` and `.claude/settings.json` and run `uvx --refresh`, then refresh the starter definitions with `turnstile update --apply`.
 

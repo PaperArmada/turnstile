@@ -89,6 +89,24 @@ def _mcp_config_dev(turnstile_dir: str) -> dict:
     }
 
 
+def _git_tracks(root: Path, rel_path: str) -> bool:
+    """True when git tracks rel_path (or anything under it) in root's repo.
+
+    Any failure (no git binary, not a repository, timeout) counts as not
+    tracked, which falls back to the plain .gitignore append.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "--error-unmatch", "--", rel_path],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
 def _get_engine(project_root: str | None = None) -> Engine:
     root = Path(project_root) if project_root else Path.cwd()
     return Engine(root)
@@ -1449,14 +1467,38 @@ def init(
             )
         created.append(f".claude/settings.json ({enforce_mode} mode)")
 
-    # .gitignore additions
+    # .gitignore additions. `.process-state/` is always runtime-local. The
+    # generated .mcp.json and .claude/settings.json are machine-specific
+    # only in dev mode, where they embed the absolute turnstile checkout
+    # path; in uvx mode they pin a release tag and are portable, so whether
+    # to commit them is the project's call. A path git already tracks is
+    # never added: the rule would contradict the repo and silently stop the
+    # file being picked up on the next clone (GH #43).
     gitignore_path = root / ".gitignore"
-    gitignore_entries = [".mcp.json", ".claude/settings.json", ".process-state/"]
+    gitignore_entries = [".process-state/"]
+    if dev:
+        gitignore_entries = [".mcp.json", ".claude/settings.json", *gitignore_entries]
     if gitignore_path.exists():
         existing = gitignore_path.read_text()
     else:
         existing = ""
-    to_add = [e for e in gitignore_entries if e not in existing]
+    to_add: list[str] = []
+    tracked: list[str] = []
+    for entry in gitignore_entries:
+        if entry in existing:
+            continue
+        (tracked if _git_tracks(root, entry) else to_add).append(entry)
+    if tracked:
+        click.echo(
+            f"  .gitignore: not ignoring {', '.join(tracked)} (tracked by git)"
+        )
+        if dev:
+            click.echo(
+                "  Warning: dev mode wrote the absolute turnstile checkout "
+                "path into the tracked file(s) above; do not commit them "
+                "as-is.",
+                err=True,
+            )
     if to_add:
         with open(gitignore_path, "a") as f:
             if existing and not existing.endswith("\n"):

@@ -15,6 +15,16 @@ described in [STABILITY.md](STABILITY.md).
 
 ### Fixed
 
+- **`turnstile init` no longer gitignores tracked files (#43).** Init
+  appended `.mcp.json` and `.claude/settings.json` to `.gitignore`
+  unconditionally, contradicting projects that commit
+  `.claude/settings.json` for shared hooks. Those two entries are now
+  added only in `--dev` mode, where the generated files embed the
+  absolute turnstile checkout path; uvx-mode output pins a release tag
+  and is portable, so the project decides whether to commit it. In
+  either mode a path git already tracks is never added (init says so,
+  and dev mode warns that the tracked file now holds a machine-specific
+  path). `.process-state/` is still always ignored.
 - **MCP server import failure on fresh installs (#42).** `turnstile-mcp`
   declared `mcp>=1.0` with no upper bound; `mcp` 2.0.0 (2026-07-28)
   removed `mcp.server.fastmcp`, so every `uvx`-based install since then
