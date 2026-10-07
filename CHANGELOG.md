@@ -7,6 +7,8 @@ described in [STABILITY.md](STABILITY.md).
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-10-07
+
 ### Changed
 
 - **`turnstile-mcp` requires the mcp 2.x SDK.** mcp 1.x is no longer

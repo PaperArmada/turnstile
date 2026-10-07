@@ -53,11 +53,11 @@ knowledge of "how teams usually work."
    catch a malformed expect expression:
 
    ```
-   uvx --python 3.12 --from "turnstile-cli @ git+https://github.com/PaperArmada/turnstile.git@v0.1.4#subdirectory=packages/turnstile-cli" turnstile validate <file>
+   uvx --python 3.12 --from "turnstile-cli @ git+https://github.com/PaperArmada/turnstile.git@v0.1.5#subdirectory=packages/turnstile-cli" turnstile validate <file>
    ```
 
    (The repo's canonical pin lives in `scripts/setup-claude-tooling`; if it
-   has moved past v0.1.4, use that version.) A draft that does not pass
+   has moved past v0.1.5, use that version.) A draft that does not pass
    `turnstile validate` is not a deliverable.
 
 ## Output contract
