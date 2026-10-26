@@ -24,17 +24,20 @@ states:
   - id: start
     type: initial
     transitions: [understand]
+    on_exit:
+      validate:
+        # Guard: don't overwrite an existing process. On leaving start, not
+        # on entering understand, so draft -> understand with the draft
+        # present is not refused.
+        - command: "test -f .processes/${name}.yaml && echo exists || echo available"
+          expect: equals("available")
+          message: ".processes/${name}.yaml must not already exist"
 
   - id: understand
     description: "Survey existing processes, available tools, and design principles"
     transitions: [draft]
     on_enter:
       validate:
-        # Guard: don't overwrite an existing process
-        - command: "test -f .processes/${name}.yaml && echo exists || echo available"
-          expect: equals("available")
-          message: ".processes/${name}.yaml must not already exist"
-
         # Progressive disclosure: surface what the author needs to
         # design a good process, nothing more.
 

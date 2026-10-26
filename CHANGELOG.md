@@ -20,10 +20,13 @@ described in [STABILITY.md](STABILITY.md).
   or on a rule inside a group. Older turnstile versions ignore the
   fields, so the gate runs on every transition there (stricter, never
   looser). The starters use it: `bug-fix` 1.4.0 (`verify -> fix`),
-  `feature-development` 1.5.0 (`test -> implement`), `create-process`
-  1.1.0 (`draft -> understand`) and `readme-update` 1.1.0
-  (`update -> audit`) no longer gate the move back, so a red suite or
-  missing artifact no longer blocks returning to fix it.
+  `feature-development` 1.5.0 (`test -> implement`) and `readme-update`
+  1.1.0 (`update -> audit`) no longer gate the move back, so a red suite
+  or missing change no longer blocks returning to fix it. `create-process`
+  1.1.0 scopes its draft-exists gate the same way and moves its
+  "must not already exist" guard from entering `understand` to leaving
+  `start`, so `draft -> understand` is allowed with the draft present.
+  `turnstile dry-run` prints each gate's scope.
 
 ### Fixed
 

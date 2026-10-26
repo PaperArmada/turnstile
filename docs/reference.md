@@ -106,15 +106,20 @@ listed states) or `except_to` (run on every transition except those):
         only_to: [done]     # verify -> fix stays ungated
 ```
 
-Gates without either field run on every transition, as before. A skipped
+`only_to` is an allowlist: a transition added to the state later,
+including by an override, is not gated until it is listed. Prefer
+`except_to` (name the retreats) when new forward targets are likely, so
+an added transition is gated by default. Gates without either field run
+on every transition, as before. A skipped
 gate is not run and does not appear in the transition's results. The
 fields apply to the transition-driven and signal-driven paths alike, and
 `process_dry_run` with a path lists only the gates that apply to each
 step. Rules a definition rejects at load time: `only_to` and `except_to`
 together, an empty list, a state name that is not one of the state's
 transitions (for a subprocess state, its `subprocess_routing` targets),
-either field on an `on_enter` gate, and either field on a rule inside an
-`any`/`all` group (scope the group instead).
+an `except_to` that excludes every transition, either field on an
+`on_enter` gate, and either field on a rule inside an `any`/`all` group
+(scope the group instead).
 
 ### Parameters
 

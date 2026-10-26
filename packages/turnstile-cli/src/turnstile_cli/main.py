@@ -704,14 +704,20 @@ def dry_run(
             if vals:
                 click.echo(f"    {phase}:")
                 for v in vals:
+                    scope = ""
+                    if "only_to" in v:
+                        scope = f" (only to {', '.join(v['only_to'])})"
+                    elif "except_to" in v:
+                        scope = f" (except to {', '.join(v['except_to'])})"
                     if v["type"].startswith("composite_"):
                         click.echo(
                             f"      {v['type']}: {v['message']} "
-                            f"({len(v['rules'])} rules)"
+                            f"({len(v['rules'])} rules){scope}"
                         )
                     else:
                         click.echo(
-                            f"      [{v['severity']}] {v['message'] or v['command']}"
+                            f"      [{v['severity']}] "
+                            f"{v['message'] or v['command']}{scope}"
                         )
 
         # Show transitions for full description mode

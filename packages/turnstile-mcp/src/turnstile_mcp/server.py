@@ -182,8 +182,9 @@ async def process_transition(
 ) -> dict[str, Any]:
     """Attempt to transition a process instance to a new state.
 
-    Runs on_exit validations for the current state and on_enter
-    validations for the target state. The transition is rejected if
+    Runs on_exit validations for the current state (those that apply to
+    this target; a gate may be scoped with only_to/except_to) and
+    on_enter validations for the target state. The transition is rejected if
     it is not a legal transition or if any validation with
     severity=error fails.
 

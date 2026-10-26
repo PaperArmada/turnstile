@@ -80,8 +80,8 @@ class TransitionScoped(BaseModel):
     ProcessDefinition, so a typo cannot silently switch a gate off.
     """
 
-    only_to: list[str] | None = None
-    except_to: list[str] | None = None
+    only_to: list[str] | None = Field(None, json_schema_extra={"minItems": 1})
+    except_to: list[str] | None = Field(None, json_schema_extra={"minItems": 1})
 
     @model_validator(mode="after")
     def _check_scope(self) -> TransitionScoped:
@@ -512,6 +512,11 @@ class ProcessDefinition(BaseModel):
                         f"State '{state.id}': on_exit validation scope names "
                         f"{', '.join(repr(t) for t in unknown)}, not among its "
                         f"transitions {legal}"
+                    )
+                if v.except_to is not None and set(legal) <= set(v.except_to):
+                    raise ValueError(
+                        f"State '{state.id}': on_exit validation except_to "
+                        f"excludes every transition {legal}, so it never runs"
                     )
 
         return self

@@ -634,3 +634,42 @@ def test_exit_gates_guard_the_forward_move_only(process, state_id, forward, back
     gates = defn.get_state(state_id).on_exit.validations
     assert [g for g in gates if g.applies_to(forward)] != []
     assert [g for g in gates if g.applies_to(back)] == []
+
+
+def test_dry_run_cli_shows_the_scope(tmp_path):
+    from click.testing import CliRunner
+
+    from turnstile_cli.main import cli
+
+    proc_dir = tmp_path / ".processes"
+    proc_dir.mkdir()
+    (proc_dir / "bug-fix.yaml").write_text(STARTERS["bug-fix.yaml"])
+    result = CliRunner().invoke(
+        cli, ["--project", str(tmp_path), "dry-run", "bug-fix"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "[error] Test suite must pass (only to done)" in result.output
+
+
+# create-process: the overwrite guard sits on start's exit, so returning
+# from draft to understand with the draft present is not refused.
+
+
+def test_create_process_understand_has_no_blocking_entry_gate():
+    defn = ProcessDefinition(**_starter("create-process"))
+    entry = defn.get_state("understand").on_enter.validations
+    assert [g for g in entry if g.severity.value == "error"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("draft_exists, passes", [(False, True), (True, False)])
+async def test_create_process_overwrite_guard_runs_on_leaving_start(
+    tmp_path, draft_exists, passes
+):
+    defn = ProcessDefinition(**_starter("create-process"))
+    (guard,) = defn.get_state("start").on_exit.validations
+    if draft_exists:
+        (tmp_path / ".processes").mkdir()
+        (tmp_path / ".processes" / "demo.yaml").write_text("name: demo\n")
+    result = await run_validation(guard, {"name": "demo"}, tmp_path)
+    assert result.passed is passes

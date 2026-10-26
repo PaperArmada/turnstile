@@ -68,6 +68,8 @@ These ship and work, but may evolve before 1.0. Breaking changes are possible wi
   instance field, and its inheritance by subprocess/dispatch children
 - `process_migrate` and definition-hash-based migration prompts
 - `process_analytics` and the analytics output shape
+- Transition-scoped exit gates: `only_to` / `except_to` on `on_exit`
+  validation entries
 - `process_reload_definitions` MCP tool
 - `check-completed --parent` filter
 

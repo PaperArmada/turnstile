@@ -33,7 +33,7 @@ version: "1.0.0"
 states:
   - id: start
     type: initial
-    transitions: [only, except, unscoped, group, awaiting]
+    transitions: [only, except, unscoped, group, mixed, awaiting]
 
   - id: only
     transitions: [done, back]
@@ -70,6 +70,18 @@ states:
               expect: empty
           message: "composite scoped as a whole"
           only_to: [done]
+
+  - id: mixed
+    transitions: [done, back]
+    on_exit:
+      validate:
+        - command: "echo red"
+          expect: empty
+          message: "scoped"
+          only_to: [done]
+        - command: "echo red"
+          expect: empty
+          message: "unscoped"
 
   - id: awaiting
     type: wait
@@ -160,6 +172,25 @@ class TestTransitionPath:
         assert not (await engine.transition(iid, "done")).success
 
 
+class TestScopedAndUnscopedOnOneState:
+    @pytest.mark.asyncio
+    async def test_unscoped_gate_still_blocks_the_excluded_target(self, engine):
+        iid = await _at(engine, "mixed")
+        result = await engine.transition(iid, "back")
+        assert not result.success
+        assert [r["message"] for r in result.validation_results] == ["unscoped"]
+
+    @pytest.mark.asyncio
+    async def test_both_gates_run_on_the_scoped_target(self, engine):
+        iid = await _at(engine, "mixed")
+        result = await engine.transition(iid, "done")
+        assert not result.success
+        assert [r["message"] for r in result.validation_results] == [
+            "scoped",
+            "unscoped",
+        ]
+
+
 class TestSignalPath:
     @pytest.mark.asyncio
     async def test_signal_to_another_target_skips_the_gate(self, engine):
@@ -208,8 +239,12 @@ def test_scoped_definition_loads():
         ({**RED, "only_to": []}, "at least one"),
         ({**RED, "only_to": ["done"], "except_to": ["back"]}, "not both"),
         ({"all": [{**RED, "only_to": ["done"]}]}, "inside"),
+        ({**RED, "except_to": ["done", "back"]}, "never runs"),
     ],
-    ids=["unknown-only", "unknown-except", "empty", "both", "nested-rule"],
+    ids=[
+        "unknown-only", "unknown-except", "empty", "both", "nested-rule",
+        "except-everything",
+    ],
 )
 def test_bad_scope_is_rejected(entry, error):
     with pytest.raises(ValueError, match=error):
@@ -287,3 +322,15 @@ def test_override_removing_a_scoped_target_is_rejected():
     parent = ProcessDefinition(**yaml.safe_load(DEFINITION))
     with pytest.raises(InheritanceError, match="'done'"):
         resolve_inheritance(_override(["back"]), parent)
+
+
+def test_override_leaving_except_to_with_nothing_to_gate_is_rejected():
+    parent = ProcessDefinition(**yaml.safe_load(DEFINITION))
+    override = ProcessOverride(
+        extends="scoped",
+        overrides=OverrideSpec(
+            patch_states=[StatePatch(id="except", transitions=["back"])]
+        ),
+    )
+    with pytest.raises(InheritanceError, match="never runs"):
+        resolve_inheritance(override, parent)
