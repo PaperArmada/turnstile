@@ -507,7 +507,10 @@ class Engine:
         engine-internal instance_id. Gate and action commands run in a shell
         with these exported as environment variables (see
         validator.run_command). Values are safe by construction because they
-        are never interpolated into the command text; this method closes the
+        are never interpolated into the command text (a template that
+        deliberately evals a command-valued parameter, such as the
+        starters' test_command, makes that value trusted code); this method
+        closes the
         matching name channel, so a caller cannot smuggle an undeclared,
         environment-significant name (PATH, LD_PRELOAD, IFS, BASH_ENV, ...)
         into the gate shell by passing it as an extra parameter. The name

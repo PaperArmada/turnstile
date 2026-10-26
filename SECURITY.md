@@ -38,6 +38,11 @@ the trust boundary:
   commands through the environment**, not interpolated into command text, so a
   value cannot inject shell syntax into a command. Gate and hook command
   *templates themselves* are trusted (they come from the definition).
+  One deliberate exception: a parameter whose value *is* a command, such as
+  the starters' `test_command`, is run by the template with `eval`, so its
+  value is trusted code supplied by whoever starts the instance (or by a
+  parent process that forwards it). Even unevaluated, a value expanded in
+  command position already chooses the program the gate runs.
 - **Enforcement scope.** The Claude Code guard gates the Edit and Write tools
   at the hook layer. It does not gate the Bash tool and does not parse shell
   command contents, so a command that mutates a file (`sed -i`, `tee`, a shell

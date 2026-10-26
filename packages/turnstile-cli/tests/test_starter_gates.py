@@ -328,15 +328,18 @@ TEST_GATES = [
     for command in _test_gates(_starter(process), state, expect)
 ]
 
-# Each value prints a pytest-style summary line only if the shell parsed it
-# as the command it is: an assignment prefix plus quoting, and a pipeline.
+# (value, count it reports). Each value prints "<count> passed in 0.01s"
+# only if the shell parsed it as the command it is: an assignment prefix
+# plus quoting, and a pipeline that rewrites the count. Unparsed, the
+# pipeline value echoes its own text, whose only count is 3.
 SHELL_SYNTAX_TEST_COMMANDS = [
     pytest.param(
         """COUNT=3 sh -c 'echo "$COUNT passed in 0.01s"'""",
+        "3",
         id="env-prefix-and-quotes",
     ),
-    pytest.param('echo "3 passed in 0.01s" | cat', id="pipeline"),
-    pytest.param("echo 3 passed in 0.01s", id="plain"),
+    pytest.param("echo 3 passed in 0.01s | tr 3 7", "7", id="pipeline"),
+    pytest.param("echo 5 passed in 0.01s", "5", id="plain"),
 ]
 
 
@@ -345,40 +348,54 @@ def test_test_gate_selection_finds_every_test_gate():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("test_command", SHELL_SYNTAX_TEST_COMMANDS)
+@pytest.mark.parametrize("test_command,count", SHELL_SYNTAX_TEST_COMMANDS)
 @pytest.mark.parametrize("gate", TEST_GATES)
 async def test_test_gate_runs_test_command_as_shell_syntax(
-    tmp_path, gate, test_command
+    tmp_path, gate, test_command, count
 ):
+    expected = count if "grep -oP" in gate else f"{count} passed in 0.01s"
     output = await _run(gate, tmp_path, test_command=test_command)
-    assert output.startswith("3"), output
-    assert "not found" not in output
+    assert output == expected
 
 
 # Parameters whose value is, by contract, a shell command the instance
-# starter supplies. Only these may be eval'd: eval of a data-valued parameter
-# re-parses that value as shell syntax, the injection the env-var passing
-# exists to prevent.
+# starter supplies. Only these may be eval'd: re-parsing a data-valued
+# parameter as shell syntax (eval, sh -c, '.', a pipe into sh) is the
+# injection the env-var passing exists to prevent.
 COMMAND_PARAMETERS = {"test_command"}
+EXAMPLES_DIR = REPO_ROOT / "examples"
 _EVAL_RE = re.compile(r"\beval\b")
-_CANONICAL_EVAL_RE = re.compile(r'\beval "\$\{(\w+)\}"')
-_EXPANSION_RE = re.compile(r"\$\{(\w+)\}")
+# The canonical form must end the eval's arguments, or eval would join a
+# following expansion into the code it parses.
+_CANONICAL_EVAL_RE = re.compile(
+    r'\beval "\$\{(\w+)\}"(?=\s*(?:$|[|;&)]|[0-9]*>))'
+)
+# $name, ${name} and ${name:-default} all expand the parameter.
+_EXPANSION_RE = re.compile(r"\$\{?(\w+)")
+_REPARSE_RE = re.compile(
+    r'\b(?:sh|bash|dash|zsh)\s+-c\s+"?\$\{?\w'
+    r'|(?:^|[;&|(]\s*)(?:\.|source)\s+"?\$\{?\w'
+    r'|\$\{?\w+\}?"?\s*\|\s*(?:sh|bash|dash|zsh)\b'
+)
 
 
 def _all_commands():
     for name, content in sorted(STARTERS.items()):
         for command in _iter_commands(yaml.safe_load(content)):
             yield f"bundle:{name}", command
-    for path in sorted(PROCESSES_DIR.glob("*.yaml")):
-        for command in _iter_commands(yaml.safe_load(path.read_text())):
-            yield f"repo:{path.name}", command
+    for directory in (PROCESSES_DIR, EXAMPLES_DIR):
+        for path in sorted(directory.glob("*.yaml")):
+            for command in _iter_commands(yaml.safe_load(path.read_text())):
+                yield f"{directory.name}/{path.name}", command
 
 
 def _evals_only_command_parameters(command: str) -> bool:
     evaluated = _CANONICAL_EVAL_RE.findall(command)
-    return len(_EVAL_RE.findall(command)) == len(evaluated) and set(
-        evaluated
-    ) <= COMMAND_PARAMETERS
+    return (
+        len(_EVAL_RE.findall(command)) == len(evaluated)
+        and set(evaluated) <= COMMAND_PARAMETERS
+        and not _REPARSE_RE.search(command)
+    )
 
 
 def _evals_every_command_parameter(command: str) -> bool:
@@ -386,14 +403,51 @@ def _evals_every_command_parameter(command: str) -> bool:
     return len(_CANONICAL_EVAL_RE.findall(command)) == len(expanded)
 
 
-def test_eval_sweep_recognizes_unsafe_and_unevaluated_forms():
-    """Canary: a broken scanner would green both sweeps silently."""
-    assert _evals_only_command_parameters('eval "${test_command}" | tail -1')
-    assert not _evals_only_command_parameters('eval "${output_file}"')
-    assert not _evals_only_command_parameters('eval "$test_command"')
-    assert not _evals_only_command_parameters("eval ${test_command}")
-    assert _evals_every_command_parameter('eval "${test_command}" | tail -1')
-    assert not _evals_every_command_parameter("${test_command} | tail -1")
+@pytest.mark.parametrize(
+    "command",
+    [
+        'eval "${test_command}" 2>&1 | tail -1',
+        'eval "${test_command}" >/dev/null 2>&1',
+        'eval "${test_command}"',
+        'test "${output_file}" = "none" && echo skip',
+    ],
+)
+def test_eval_sweep_accepts_safe_forms(command):
+    assert _evals_only_command_parameters(command)
+    assert _evals_every_command_parameter(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'eval "${output_file}"',
+        'eval "$test_command"',
+        "eval ${test_command}",
+        'eval "${test_command}" "${output_file}"',
+        'eval "${test_command}" ${output_file}',
+        'sh -c "${output_file}"',
+        'bash -c "$output_file"',
+        '. "${output_file}"',
+        'true; source "${output_file}"',
+        'echo "${output_file}" | sh',
+    ],
+)
+def test_eval_sweep_rejects_reparsing_forms(command):
+    """Canary: each form re-parses a value the sweep must not allow."""
+    assert not _evals_only_command_parameters(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "${test_command} 2>&1 | tail -1",
+        "$test_command 2>&1 | tail -1",
+        "${test_command:-pytest} 2>&1 | tail -1",
+    ],
+)
+def test_eval_sweep_rejects_unevaluated_command_parameters(command):
+    """Canary: each form runs a command parameter without parsing it."""
+    assert not _evals_every_command_parameter(command)
 
 
 def test_only_command_parameters_are_evaluated():

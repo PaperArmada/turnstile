@@ -113,32 +113,41 @@ states:
         - command: 'echo "Deployed ${branch_name} for ${ticket_id}"'
 ```
 
-The shell expands a value as plain words, never as shell syntax. A
-parameter that is itself a command, such as a test invocation, therefore
-loses any environment prefix, quoting, or pipe it contains when expanded
-bare: `${test_command}` with the value `FOO=1 pytest` runs a program
-named `FOO=1`. To run such a value as the command line the user wrote,
-pass it to `eval` deliberately:
+An expansion is never parsed as shell syntax: a quoted one stays a single
+word, and an unquoted one is only split into words. A parameter that is
+itself a command, such as a test invocation, therefore loses any
+environment prefix, quoting, or pipe it contains when expanded as
+`${test_command}`: the value `FOO=1 pytest` runs a program named
+`FOO=1`. To run such a value as the command line the user wrote, pass it
+to `eval` deliberately:
 
 ```yaml
 parameters:
   - name: test_command
-    description: "Test suite invocation; run with eval, so shell syntax works"
+    description: "Test suite invocation (POSIX sh syntax); gates run it with eval"
     default: "pytest"
 
 states:
   - id: verify
     on_exit:
       validate:
-        - command: 'eval "${test_command}" 2>&1 | tail -1'
-          expect: contains("passed")
+        - command: 'eval "${test_command}" >/dev/null 2>&1'
+          expect: exit_code(0)
+          message: "Test suite must pass"
 ```
 
-Use `eval` only for parameters whose value is meant to be a command. On
-a data parameter (a branch name, a file path, an issue id) it re-parses
-the value as shell syntax, which is the injection the environment-variable
-passing prevents. The starter `bug-fix` and `feature-development`
-definitions eval `test_command` and nothing else.
+Commands run under `/bin/sh`, which is `dash` on Debian and Ubuntu, so a
+command value must use POSIX syntax: `. .venv/bin/activate && pytest`, not
+`source ...`; wrap bash-only syntax in `bash -c '...'`.
+
+Use `eval` only for parameters whose value is meant to be a command.
+Whoever supplies that value (the user starting the instance, or a parent
+process forwarding it through `parameter_map`) can run anything the gate
+can, so treat it as trusted code. On a data parameter (a branch name, a
+file path, an issue id) `eval`, `sh -c`, or `.` re-parses the value as
+shell syntax, which is the injection the environment-variable passing
+prevents. The starter `bug-fix` and `feature-development` definitions
+eval `test_command` and nothing else.
 
 ### Evidence-based validation
 

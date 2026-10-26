@@ -15,12 +15,16 @@ described in [STABILITY.md](STABILITY.md).
   environment prefix, quotes, or a pipe (`FOO="" pytest tests/`) failed
   the test gates with `FOO="": not found` on a green suite. The
   `bug-fix` (1.3.1) and `feature-development` (1.4.1) starters now run
-  it with `eval "${test_command}"`; the engine is unchanged. `turnstile
-  init` never overwrites an existing definition, so projects that
-  already installed the starters apply the same change to the
-  `test_command` gates in their `.processes/` copies (or delete those
-  two files and re-run init). `docs/reference.md` documents when to use
-  `eval` and why data parameters must never be evaluated.
+  it with `eval "${test_command}"`; the engine is unchanged. The value
+  is now parsed as POSIX `sh` code, so `$`, backslashes, `;`, `&` and
+  quotes in an existing value take effect (`source` does not exist in
+  `dash`; use `.`). `turnstile init` never overwrites an existing
+  definition: projects that already installed the starters pick up the
+  change with `turnstile update --apply --ref <release tag>`, which
+  replaces every changed definition including locally edited ones, or
+  by applying the same edit to the `test_command` gates in their
+  `.processes/` copies. `docs/reference.md` and `SECURITY.md` document
+  when to use `eval` and that an evaluated value is trusted code.
 
 ## [0.1.5] - 2026-10-07
 

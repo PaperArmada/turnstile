@@ -19,7 +19,7 @@ parameters:
     required: false
     default: "none"
   - name: test_command
-    description: "Command to run the test suite, as you would type it in a shell: gates run it with eval, so an environment prefix (FOO=1 pytest), quotes, and pipes work. The default assumes pytest is on PATH in the gate's environment; pass your project's real invocation (e.g. 'uv run --group dev python -m pytest tests/') to avoid resolving a stray global pytest"
+    description: "Command to run the test suite, in POSIX sh syntax: gates run it with eval under /bin/sh, so an environment prefix (FOO=1 pytest), quotes, and pipes work, but bash-only syntax such as 'source' does not (use '. .venv/bin/activate'). The default assumes pytest is on PATH in the gate's environment; pass your project's real invocation (e.g. 'uv run --group dev python -m pytest tests/') to avoid resolving a stray global pytest"
     required: false
     default: "pytest"
 
