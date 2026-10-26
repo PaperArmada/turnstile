@@ -9,6 +9,13 @@ described in [STABILITY.md](STABILITY.md).
 
 ### Fixed
 
+- **"Test suite must pass" gates refuse a red suite.** The `bug-fix`
+  (1.3.2) and `feature-development` (1.4.2) suite gates matched
+  `contains("passed")` on the summary line, so a failing pytest run
+  (`1 failed, 3 passed`) passed the gate. They now gate on the test
+  command's exit status and still print its last line. A test command
+  that exits 0 passes regardless of its output format, so the gate is no
+  longer tied to pytest's summary text.
 - **Starter test gates run `test_command` as a shell command (#44).**
   Parameters reach gates as environment variables (since 0.1.0), and a
   bare `${test_command}` expands as words only, so a value with an

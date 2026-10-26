@@ -24,7 +24,8 @@ import pytest
 import yaml
 
 from turnstile_cli.starters import STARTERS
-from turnstile_core.validator import run_command
+from turnstile_core.models import ValidationRule
+from turnstile_core.validator import run_command, run_validation
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PROCESSES_DIR = REPO_ROOT / ".processes"
@@ -324,7 +325,7 @@ TEST_GATES = [
         ("feature-development", "test"),
         ("feature-development", "understand"),
     ]
-    for expect in ('contains("passed")', "not_empty")
+    for expect in ("exit_code(0)", "not_empty")
     for command in _test_gates(_starter(process), state, expect)
 ]
 
@@ -356,6 +357,53 @@ async def test_test_gate_runs_test_command_as_shell_syntax(
     expected = count if "grep -oP" in gate else f"{count} passed in 0.01s"
     output = await _run(gate, tmp_path, test_command=test_command)
     assert output == expected
+
+
+# ---------------------------------------------------------------------------
+# "Test suite must pass" gates refuse a red suite
+# ---------------------------------------------------------------------------
+#
+# The gate matched contains("passed") on the summary line, and a red pytest
+# summary such as "1 failed, 3 passed" contains "passed".
+
+
+def _suite_gate(process: str, state_id: str) -> ValidationRule:
+    state = _state(_starter(process), state_id)
+    rules = [
+        r
+        for r in state["on_exit"]["validate"]
+        if r.get("message") == "Test suite must pass"
+    ]
+    assert len(rules) == 1
+    return ValidationRule(**rules[0])
+
+
+SUITE_GATES = [
+    pytest.param(_suite_gate("bug-fix", "verify"), id="bug-fix/verify"),
+    pytest.param(
+        _suite_gate("feature-development", "test"), id="feature-development/test"
+    ),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("gate", SUITE_GATES)
+async def test_suite_gate_refuses_a_red_suite_whose_summary_says_passed(
+    tmp_path, gate
+):
+    red = "echo '=== 1 failed, 3 passed in 0.10s ==='; exit 1"
+    result = await run_validation(gate, {"test_command": red}, tmp_path)
+    assert not result.passed
+    assert "1 failed, 3 passed" in result.output
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("gate", SUITE_GATES)
+async def test_suite_gate_accepts_a_green_suite(tmp_path, gate):
+    green = "echo '=== 3 passed in 0.10s ==='"
+    result = await run_validation(gate, {"test_command": green}, tmp_path)
+    assert result.passed
+    assert "3 passed" in result.output
 
 
 # Parameters whose value is, by contract, a shell command the instance

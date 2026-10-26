@@ -1,6 +1,6 @@
 name: feature-development
 description: "Standard feature development workflow"
-version: "1.4.1"
+version: "1.4.2"
 
 metadata:
   author: "matt"
@@ -75,8 +75,10 @@ states:
         # Hard gate: tests must pass
         # eval: test_command is a shell command by contract, so the shell must
         # parse it (env prefixes, quotes, pipes). Never eval a data parameter.
-        - command: "eval \"${test_command}\" 2>&1 | tail -1"
-          expect: contains("passed")
+        # Gate on the suite's own exit status (a red summary such as
+        # "1 failed, 3 passed" contains "passed"); print its last line.
+        - command: "out=$(eval \"${test_command}\" 2>&1); status=$?; printf '%s\\n' \"$out\" | tail -1; exit $status"
+          expect: exit_code(0)
           message: "Test suite must pass"
 
         # Check no test regressions
