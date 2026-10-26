@@ -1,6 +1,6 @@
 name: readme-update
 description: "Update the project README to reflect the current state of the codebase"
-version: "1.0.0"
+version: "1.1.0"
 
 metadata:
   principles:
@@ -59,6 +59,7 @@ states:
         - command: "git diff --name-only README.md | wc -l | tr -d ' '"
           expect: greater_than(0)
           message: "README.md must have uncommitted changes"
+          only_to: [verify]
 
   - id: verify
     description: "Check README completeness against the actual codebase"

@@ -88,6 +88,34 @@ validate:
         expect: not_empty
 ```
 
+#### Scoping exit gates to transitions
+
+An `on_exit` gate runs on every transition out of its state, backward as
+well as forward. A gate that means "proven before advancing" can name the
+transitions it guards with `only_to` (run only on transitions into the
+listed states) or `except_to` (run on every transition except those):
+
+```yaml
+- id: verify
+  transitions: [done, fix]
+  on_exit:
+    validate:
+      - command: 'eval "${test_command}" >/dev/null 2>&1'
+        expect: exit_code(0)
+        message: "Test suite must pass"
+        only_to: [done]     # verify -> fix stays ungated
+```
+
+Gates without either field run on every transition, as before. A skipped
+gate is not run and does not appear in the transition's results. The
+fields apply to the transition-driven and signal-driven paths alike, and
+`process_dry_run` with a path lists only the gates that apply to each
+step. Rules a definition rejects at load time: `only_to` and `except_to`
+together, an empty list, a state name that is not one of the state's
+transitions (for a subprocess state, its `subprocess_routing` targets),
+either field on an `on_enter` gate, and either field on a rule inside an
+`any`/`all` group (scope the group instead).
+
 ### Parameters
 
 Parameter values are passed to gate and action commands as **environment

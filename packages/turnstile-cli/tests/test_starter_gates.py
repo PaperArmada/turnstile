@@ -24,7 +24,7 @@ import pytest
 import yaml
 
 from turnstile_cli.starters import STARTERS
-from turnstile_core.models import ValidationRule
+from turnstile_core.models import ProcessDefinition, ValidationRule
 from turnstile_core.validator import run_command, run_validation
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -613,3 +613,24 @@ def test_no_repo_process_definition_single_quotes_a_placeholder():
         "single-quoted ${var} never expands; use the double-quoted "
         f"env-var form instead: {offenders}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Retreats are never gated (#45): exit gates are scoped to the forward move
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "process, state_id, forward, back",
+    [
+        ("bug-fix", "verify", "done", "fix"),
+        ("feature-development", "test", "review", "implement"),
+        ("create-process", "draft", "review", "understand"),
+        ("readme-update", "update", "verify", "audit"),
+    ],
+)
+def test_exit_gates_guard_the_forward_move_only(process, state_id, forward, back):
+    defn = ProcessDefinition(**_starter(process))
+    gates = defn.get_state(state_id).on_exit.validations
+    assert [g for g in gates if g.applies_to(forward)] != []
+    assert [g for g in gates if g.applies_to(back)] == []

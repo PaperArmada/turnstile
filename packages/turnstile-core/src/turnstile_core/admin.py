@@ -69,26 +69,34 @@ def generate_mermaid(defn: ProcessDefinition) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _describe_validations(hooks) -> list[dict[str, Any]]:
-    """Describe validations without executing them."""
+def _describe_validations(
+    hooks, target: str | None = None
+) -> list[dict[str, Any]]:
+    """Describe validations without executing them.
+
+    With ``target`` (an on_exit hook on a simulated step), only the entries
+    that would run on a transition into that state are described.
+    """
     if not hooks or not hooks.validations:
         return []
 
     results = []
     for entry in hooks.validations:
+        if target is not None and not entry.applies_to(target):
+            continue
         if isinstance(entry, ValidationRule):
-            results.append({
+            described = {
                 "type": "validation",
                 "command": entry.command,
                 "expect": entry.expect,
                 "severity": entry.severity.value,
                 "message": entry.message,
                 "timeout": entry.timeout,
-            })
+            }
         elif isinstance(entry, CompositeValidation):
             composite_type = "any" if entry.any_of else "all"
             rules = entry.any_of or entry.all_of or []
-            results.append({
+            described = {
                 "type": f"composite_{composite_type}",
                 "message": entry.message,
                 "rules": [
@@ -100,7 +108,14 @@ def _describe_validations(hooks) -> list[dict[str, Any]]:
                     }
                     for r in rules
                 ],
-            })
+            }
+        else:
+            continue
+        if entry.only_to is not None:
+            described["only_to"] = entry.only_to
+        if entry.except_to is not None:
+            described["except_to"] = entry.except_to
+        results.append(described)
     return results
 
 
@@ -155,7 +170,9 @@ def _simulate_path(
             "from_state": current.id,
             "to_state": target_id,
             "legal": target_id in current.transitions,
-            "on_exit_validations": _describe_validations(current.on_exit),
+            "on_exit_validations": _describe_validations(
+                current.on_exit, target=target_id
+            ),
             "on_exit_actions": _describe_actions(current.on_exit),
         }
 

@@ -542,20 +542,27 @@ class Engine:
     async def _run_exit_gates(
         self,
         state: ProcessState,
+        target: str,
         validation_params: dict[str, str],
         work_dir: Path | None = None,
     ) -> tuple[list[ValidationResult], bool]:
-        """Run a state's on_exit validations.
+        """Run a state's on_exit validations that apply to ``target``.
 
         Returns (results, blocked). Shared by transition and receive_signal so
         that a signal-driven state change is gated identically to an ordinary
         one; before this was factored out, the signal path ran no gates at all.
+        Entries scoped with only_to/except_to are skipped (not run, not
+        reported) on transitions they do not guard.
         """
-        if not (state.on_exit and state.on_exit.validations):
+        if not state.on_exit:
+            return [], False
+        applicable = [
+            v for v in state.on_exit.validations if v.applies_to(target)
+        ]
+        if not applicable:
             return [], False
         results = await run_validations(
-            state.on_exit.validations, validation_params,
-            work_dir or self.project_root,
+            applicable, validation_params, work_dir or self.project_root,
         )
         return results, has_blocking_failures(results)
 
@@ -1021,7 +1028,8 @@ class Engine:
 
         # Run on_exit validations for current state
         exit_results, exit_blocked = await self._run_exit_gates(
-            current, validation_params, work_dir=self._work_dir(instance)
+            current, target.id, validation_params,
+            work_dir=self._work_dir(instance),
         )
         all_results.extend(exit_results)
         if exit_blocked:
@@ -1450,7 +1458,8 @@ class Engine:
             validation_params = self._gate_params(instance, defn)
             gate_results: list[ValidationResult] = []
             exit_results, exit_blocked = await self._run_exit_gates(
-                current, validation_params, work_dir=self._work_dir(instance)
+                current, target_state, validation_params,
+                work_dir=self._work_dir(instance),
             )
             gate_results.extend(exit_results)
             blocked_by = "on_exit" if exit_blocked else ""

@@ -69,7 +69,45 @@ def parse_expect(expr: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-class ValidationRule(BaseModel):
+class TransitionScoped(BaseModel):
+    """Optional scoping of an on_exit validation entry to target states.
+
+    By default an on_exit entry runs on every transition out of its state.
+    ``only_to`` limits it to transitions into the listed states;
+    ``except_to`` runs it on every transition except those. A gate that
+    means "proven before advancing" can then leave the retreat ungated
+    (GH #45). Target names are checked against the state's transitions by
+    ProcessDefinition, so a typo cannot silently switch a gate off.
+    """
+
+    only_to: list[str] | None = None
+    except_to: list[str] | None = None
+
+    @model_validator(mode="after")
+    def _check_scope(self) -> TransitionScoped:
+        if self.only_to is not None and self.except_to is not None:
+            raise ValueError("use only_to or except_to, not both")
+        for key in ("only_to", "except_to"):
+            if getattr(self, key) == []:
+                raise ValueError(f"{key} must list at least one state")
+        return self
+
+    def is_scoped(self) -> bool:
+        return self.only_to is not None or self.except_to is not None
+
+    def scope_targets(self) -> list[str]:
+        return self.only_to or self.except_to or []
+
+    def applies_to(self, target: str) -> bool:
+        """Whether this entry runs on a transition into ``target``."""
+        if self.only_to is not None:
+            return target in self.only_to
+        if self.except_to is not None:
+            return target not in self.except_to
+        return True
+
+
+class ValidationRule(TransitionScoped):
     """A single validation gate: run a command and check the output."""
 
     command: str
@@ -86,7 +124,7 @@ class ValidationRule(BaseModel):
         return self
 
 
-class CompositeValidation(BaseModel):
+class CompositeValidation(TransitionScoped):
     """Composite assertion: 'any' (OR) or 'all' (AND) over a list of rules."""
 
     any_of: list[ValidationRule] | None = Field(None, alias="any")
@@ -102,6 +140,11 @@ class CompositeValidation(BaseModel):
         if has_any == has_all:
             raise ValueError(
                 "CompositeValidation must have exactly one of 'any' or 'all'"
+            )
+        if any(r.is_scoped() for r in (self.any_of or self.all_of or [])):
+            raise ValueError(
+                "only_to/except_to scope a whole 'any'/'all' group; set them "
+                "on the group, not on a rule inside it"
             )
         return self
 
@@ -270,6 +313,19 @@ class ProcessState(BaseModel):
     immediate: str | None = None
     assign_to: str | None = None
 
+    def exit_targets(self) -> list[str]:
+        """States a transition out of this one may target.
+
+        A subprocess state with routing leaves through its on_complete and
+        on_fail targets, not its transitions list (mirrors Engine.transition).
+        """
+        if self.type == StateType.subprocess and self.subprocess_routing:
+            return (
+                self.subprocess_routing.on_complete_targets()
+                + self.subprocess_routing.on_fail
+            )
+        return self.transitions
+
     @model_validator(mode="after")
     def _check_subprocess_fields(self) -> ProcessState:
         if self.type == StateType.subprocess:
@@ -434,6 +490,29 @@ class ProcessDefinition(BaseModel):
                 raise ValueError(
                     f"Terminal state '{state.id}' must not have transitions"
                 )
+
+        # Transition-scoped validations: on_exit only, and every named
+        # target must be one of the state's own transitions. An unknown
+        # name would otherwise leave an only_to gate silently never running.
+        for state in self.states:
+            if state.on_enter and any(
+                v.is_scoped() for v in state.on_enter.validations
+            ):
+                raise ValueError(
+                    f"State '{state.id}': only_to/except_to apply to on_exit "
+                    f"validations, not on_enter"
+                )
+            if not state.on_exit:
+                continue
+            for v in state.on_exit.validations:
+                legal = state.exit_targets()
+                unknown = [t for t in v.scope_targets() if t not in legal]
+                if unknown:
+                    raise ValueError(
+                        f"State '{state.id}': on_exit validation scope names "
+                        f"{', '.join(repr(t) for t in unknown)}, not among its "
+                        f"transitions {legal}"
+                    )
 
         return self
 

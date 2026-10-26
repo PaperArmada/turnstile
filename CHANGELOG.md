@@ -7,6 +7,24 @@ described in [STABILITY.md](STABILITY.md).
 
 ## [Unreleased]
 
+### Added
+
+- **Transition-scoped exit gates (#45).** An `on_exit` validation (a rule
+  or an `any`/`all` group) accepts `only_to: [states]` or
+  `except_to: [states]`, so a gate meaning "proven before advancing" no
+  longer refuses the retreat (`verify -> fix`). Unscoped gates run on
+  every transition as before. Honored on ordinary and signal-driven
+  transitions and in `process_dry_run` path simulation. Definitions are
+  rejected at load time when a scope names a state the transition cannot
+  reach, sets both fields, lists nothing, or sits on an `on_enter` gate
+  or on a rule inside a group. Older turnstile versions ignore the
+  fields, so the gate runs on every transition there (stricter, never
+  looser). The starters use it: `bug-fix` 1.4.0 (`verify -> fix`),
+  `feature-development` 1.5.0 (`test -> implement`), `create-process`
+  1.1.0 (`draft -> understand`) and `readme-update` 1.1.0
+  (`update -> audit`) no longer gate the move back, so a red suite or
+  missing artifact no longer blocks returning to fix it.
+
 ### Fixed
 
 - **"Test suite must pass" gates refuse a red suite.** The `bug-fix`
