@@ -17,6 +17,7 @@ additionally rejects the single-quoted-placeholder anti-pattern anywhere a
 command appears, in both the bundle and the repo .processes/ source.
 """
 
+import re
 from pathlib import Path
 
 import pytest
@@ -293,6 +294,128 @@ async def test_decision_domain_gate_displays_the_actual_domain(tmp_path):
 async def test_observation_domain_gate_displays_the_actual_domain(tmp_path):
     output = await _run(SM_DOMAIN_GATE, tmp_path, domain="market research")
     assert output == "Domain: market research"
+
+
+# ---------------------------------------------------------------------------
+# Command-valued parameters run as the shell command the user wrote (#44)
+# ---------------------------------------------------------------------------
+#
+# A bare ${test_command} is expanded as words only: an environment prefix,
+# quotes, or a pipe in the value are not shell syntax, so a test invocation
+# such as FOO="" pytest failed every test gate with 'FOO="": not found'.
+
+
+def _test_gates(definition: dict, state_id: str, expect: str) -> list[str]:
+    state = _state(definition, state_id)
+    rules = []
+    for hook in ("on_enter", "on_exit"):
+        rules.extend((state.get(hook) or {}).get("validate") or [])
+    return [
+        r["command"]
+        for r in rules
+        if "test_command" in r["command"] and r.get("expect") == expect
+    ]
+
+
+TEST_GATES = [
+    pytest.param(command, id=f"{process}/{state}/{expect}")
+    for process, state in [
+        ("bug-fix", "verify"),
+        ("feature-development", "test"),
+        ("feature-development", "understand"),
+    ]
+    for expect in ('contains("passed")', "not_empty")
+    for command in _test_gates(_starter(process), state, expect)
+]
+
+# Each value prints a pytest-style summary line only if the shell parsed it
+# as the command it is: an assignment prefix plus quoting, and a pipeline.
+SHELL_SYNTAX_TEST_COMMANDS = [
+    pytest.param(
+        """COUNT=3 sh -c 'echo "$COUNT passed in 0.01s"'""",
+        id="env-prefix-and-quotes",
+    ),
+    pytest.param('echo "3 passed in 0.01s" | cat', id="pipeline"),
+    pytest.param("echo 3 passed in 0.01s", id="plain"),
+]
+
+
+def test_test_gate_selection_finds_every_test_gate():
+    assert len(TEST_GATES) == 5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("test_command", SHELL_SYNTAX_TEST_COMMANDS)
+@pytest.mark.parametrize("gate", TEST_GATES)
+async def test_test_gate_runs_test_command_as_shell_syntax(
+    tmp_path, gate, test_command
+):
+    output = await _run(gate, tmp_path, test_command=test_command)
+    assert output.startswith("3"), output
+    assert "not found" not in output
+
+
+# Parameters whose value is, by contract, a shell command the instance
+# starter supplies. Only these may be eval'd: eval of a data-valued parameter
+# re-parses that value as shell syntax, the injection the env-var passing
+# exists to prevent.
+COMMAND_PARAMETERS = {"test_command"}
+_EVAL_RE = re.compile(r"\beval\b")
+_CANONICAL_EVAL_RE = re.compile(r'\beval "\$\{(\w+)\}"')
+_EXPANSION_RE = re.compile(r"\$\{(\w+)\}")
+
+
+def _all_commands():
+    for name, content in sorted(STARTERS.items()):
+        for command in _iter_commands(yaml.safe_load(content)):
+            yield f"bundle:{name}", command
+    for path in sorted(PROCESSES_DIR.glob("*.yaml")):
+        for command in _iter_commands(yaml.safe_load(path.read_text())):
+            yield f"repo:{path.name}", command
+
+
+def _evals_only_command_parameters(command: str) -> bool:
+    evaluated = _CANONICAL_EVAL_RE.findall(command)
+    return len(_EVAL_RE.findall(command)) == len(evaluated) and set(
+        evaluated
+    ) <= COMMAND_PARAMETERS
+
+
+def _evals_every_command_parameter(command: str) -> bool:
+    expanded = [p for p in _EXPANSION_RE.findall(command) if p in COMMAND_PARAMETERS]
+    return len(_CANONICAL_EVAL_RE.findall(command)) == len(expanded)
+
+
+def test_eval_sweep_recognizes_unsafe_and_unevaluated_forms():
+    """Canary: a broken scanner would green both sweeps silently."""
+    assert _evals_only_command_parameters('eval "${test_command}" | tail -1')
+    assert not _evals_only_command_parameters('eval "${output_file}"')
+    assert not _evals_only_command_parameters('eval "$test_command"')
+    assert not _evals_only_command_parameters("eval ${test_command}")
+    assert _evals_every_command_parameter('eval "${test_command}" | tail -1')
+    assert not _evals_every_command_parameter("${test_command} | tail -1")
+
+
+def test_only_command_parameters_are_evaluated():
+    offenders = [
+        (source, command)
+        for source, command in _all_commands()
+        if not _evals_only_command_parameters(command)
+    ]
+    assert offenders == [], (
+        f'eval only {sorted(COMMAND_PARAMETERS)}, as eval "${{name}}": {offenders}'
+    )
+
+
+def test_command_parameters_are_always_evaluated():
+    offenders = [
+        (source, command)
+        for source, command in _all_commands()
+        if not _evals_every_command_parameter(command)
+    ]
+    assert offenders == [], (
+        f'expand command parameters with eval "${{name}}": {offenders}'
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -7,6 +7,21 @@ described in [STABILITY.md](STABILITY.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Starter test gates run `test_command` as a shell command (#44).**
+  Parameters reach gates as environment variables (since 0.1.0), and a
+  bare `${test_command}` expands as words only, so a value with an
+  environment prefix, quotes, or a pipe (`FOO="" pytest tests/`) failed
+  the test gates with `FOO="": not found` on a green suite. The
+  `bug-fix` (1.3.1) and `feature-development` (1.4.1) starters now run
+  it with `eval "${test_command}"`; the engine is unchanged. `turnstile
+  init` never overwrites an existing definition, so projects that
+  already installed the starters apply the same change to the
+  `test_command` gates in their `.processes/` copies (or delete those
+  two files and re-run init). `docs/reference.md` documents when to use
+  `eval` and why data parameters must never be evaluated.
+
 ## [0.1.5] - 2026-10-07
 
 ### Changed

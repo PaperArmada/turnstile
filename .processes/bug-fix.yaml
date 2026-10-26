@@ -1,6 +1,6 @@
 name: bug-fix
 description: "Structured bug fix workflow: reproduce, diagnose, fix, verify"
-version: "1.3.0"
+version: "1.3.1"
 
 metadata:
   author: "turnstile"
@@ -19,7 +19,7 @@ parameters:
     required: false
     default: "none"
   - name: test_command
-    description: "Command to run the test suite. The default assumes pytest is on PATH in the gate's environment; pass your project's real invocation (e.g. 'uv run --group dev python -m pytest tests/') to avoid resolving a stray global pytest"
+    description: "Command to run the test suite, as you would type it in a shell: gates run it with eval, so an environment prefix (FOO=1 pytest), quotes, and pipes work. The default assumes pytest is on PATH in the gate's environment; pass your project's real invocation (e.g. 'uv run --group dev python -m pytest tests/') to avoid resolving a stray global pytest"
     required: false
     default: "pytest"
 
@@ -78,11 +78,13 @@ states:
 
     on_exit:
       validate:
-        - command: "${test_command} 2>&1 | tail -1"
+        # eval: test_command is a shell command by contract, so the shell must
+        # parse it (env prefixes, quotes, pipes). Never eval a data parameter.
+        - command: "eval \"${test_command}\" 2>&1 | tail -1"
           expect: contains("passed")
           message: "Test suite must pass"
 
-        - command: "${test_command} 2>&1 | tail -1 | grep -oP '\\d+(?= passed)'"
+        - command: "eval \"${test_command}\" 2>&1 | tail -1 | grep -oP '\\d+(?= passed)'"
           expect: not_empty
           message: "Test count (verify no regressions)"
           severity: info

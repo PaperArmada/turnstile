@@ -113,6 +113,33 @@ states:
         - command: 'echo "Deployed ${branch_name} for ${ticket_id}"'
 ```
 
+The shell expands a value as plain words, never as shell syntax. A
+parameter that is itself a command, such as a test invocation, therefore
+loses any environment prefix, quoting, or pipe it contains when expanded
+bare: `${test_command}` with the value `FOO=1 pytest` runs a program
+named `FOO=1`. To run such a value as the command line the user wrote,
+pass it to `eval` deliberately:
+
+```yaml
+parameters:
+  - name: test_command
+    description: "Test suite invocation; run with eval, so shell syntax works"
+    default: "pytest"
+
+states:
+  - id: verify
+    on_exit:
+      validate:
+        - command: 'eval "${test_command}" 2>&1 | tail -1'
+          expect: contains("passed")
+```
+
+Use `eval` only for parameters whose value is meant to be a command. On
+a data parameter (a branch name, a file path, an issue id) it re-parses
+the value as shell syntax, which is the injection the environment-variable
+passing prevents. The starter `bug-fix` and `feature-development`
+definitions eval `test_command` and nothing else.
+
 ### Evidence-based validation
 
 Check that a file exists and is recent enough:
