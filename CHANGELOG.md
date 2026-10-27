@@ -7,6 +7,8 @@ described in [STABILITY.md](STABILITY.md).
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-10-27
+
 ### Added
 
 - **Transition-scoped exit gates (#45).** An `on_exit` validation (a rule
@@ -339,5 +341,5 @@ Initial public release.
 
 See [SECURITY.md](SECURITY.md) for the trust boundary and how to report issues.
 
-[Unreleased]: https://github.com/PaperArmada/turnstile/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/PaperArmada/turnstile/compare/v0.1.6...HEAD
 [0.1.0]: https://github.com/PaperArmada/turnstile/releases/tag/v0.1.0
