@@ -673,3 +673,91 @@ async def test_create_process_overwrite_guard_runs_on_leaving_start(
         (tmp_path / ".processes" / "demo.yaml").write_text("name: demo\n")
     result = await run_validation(guard, {"name": "demo"}, tmp_path)
     assert result.passed is passes
+
+
+# ---------------------------------------------------------------------------
+# release: the tag is created inside the tag state
+# ---------------------------------------------------------------------------
+#
+# Entering tag refused any existing tag, so tagging early (to check the
+# tagged build before pushing) meant skipping the gate. Entry now refuses
+# only a tag on another commit; leaving for done requires the tag at HEAD.
+
+
+def _git(cwd: Path, *args: str) -> None:
+    import subprocess
+
+    # No hooks: the developer's global commit hooks must not judge fixtures.
+    config = ["-c", "user.name=t", "-c", "user.email=t@t"]
+    config += ["-c", "core.hooksPath=/dev/null"]
+    subprocess.run(
+        ["git", *config, *args],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+    )
+
+
+@pytest.fixture
+def release_repo(tmp_path):
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "commit", "-q", "--allow-empty", "-m", "first")
+    _git(tmp_path, "commit", "-q", "--allow-empty", "-m", "second")
+    return tmp_path
+
+
+def _release_gate(hook: str) -> ValidationRule:
+    state = ProcessDefinition(**_starter("release")).get_state("tag")
+    (gate,) = [
+        g for g in getattr(state, hook).validations if g.severity.value == "error"
+    ]
+    return gate
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tag_args, passes",
+    [
+        pytest.param([], True, id="no-tag"),
+        pytest.param(["v1.0.0"], True, id="lightweight-at-head"),
+        pytest.param(["-a", "v1.0.0", "-m", "v1.0.0"], True, id="annotated-at-head"),
+        pytest.param(["v1.0.0", "HEAD~1"], False, id="on-another-commit"),
+    ],
+)
+async def test_release_tag_entry_refuses_only_a_tag_elsewhere(
+    release_repo, tag_args, passes
+):
+    if tag_args:
+        _git(release_repo, "tag", *tag_args)
+    result = await run_validation(
+        _release_gate("on_enter"), {"version": "1.0.0"}, release_repo
+    )
+    assert result.passed is passes, result.output
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tag_args, passes",
+    [
+        pytest.param([], False, id="no-tag"),
+        pytest.param(["v1.0.0"], True, id="lightweight-at-head"),
+        pytest.param(["-a", "v1.0.0", "-m", "v1.0.0"], True, id="annotated-at-head"),
+        pytest.param(["v1.0.0", "HEAD~1"], False, id="on-another-commit"),
+        pytest.param(["v1.0.1"], False, id="other-version"),
+    ],
+)
+async def test_release_tag_exit_requires_the_tag_at_head(
+    release_repo, tag_args, passes
+):
+    if tag_args:
+        _git(release_repo, "tag", *tag_args)
+    result = await run_validation(
+        _release_gate("on_exit"), {"version": "1.0.0"}, release_repo
+    )
+    assert result.passed is passes, result.output
+
+
+def test_release_tag_exit_gate_does_not_block_the_retreat():
+    gate = _release_gate("on_exit")
+    assert gate.applies_to("done")
+    assert not gate.applies_to("validate")

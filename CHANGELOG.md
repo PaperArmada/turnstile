@@ -53,6 +53,12 @@ described in [STABILITY.md](STABILITY.md).
   by applying the same edit to the `test_command` gates in their
   `.processes/` copies. `docs/reference.md` and `SECURITY.md` document
   when to use `eval` and that an evaluated value is trusted code.
+- **The `release` starter (1.2.0) allows tagging inside the `tag` state.**
+  Entering `tag` refused any existing `v${version}` tag, so creating the
+  tag locally first (to check the tagged build before pushing) required
+  skipping the gate. Entry now refuses only a tag on another commit, and
+  leaving `tag` for `done` requires `v${version}` to exist and point at
+  `HEAD`.
 
 ## [0.1.5] - 2026-10-07
 

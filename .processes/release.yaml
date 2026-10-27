@@ -1,6 +1,6 @@
 name: release
 description: "Prepare, validate, and ship a versioned release"
-version: "1.1.0"
+version: "1.2.0"
 
 metadata:
   author: "turnstile"
@@ -59,18 +59,26 @@ states:
           severity: warning
 
   - id: tag
-    description: "Create the release tag and finalize"
+    description: "Create the release tag locally, check the tagged build, then finalize"
     transitions: [done, validate]
     on_enter:
       validate:
-        - command: "git tag -l v${version} 2>/dev/null | wc -l | tr -d ' '"
-          expect: equals("0")
-          message: "Tag v${version} must not already exist"
+        # A tag already at HEAD is allowed, so tag -> validate -> tag works
+        # after tagging.
+        - command: 'tag=$(git rev-parse -q --verify "refs/tags/v${version}^{commit}"); if [ -z "$tag" ]; then echo absent; elif [ "$tag" = "$(git rev-parse HEAD)" ]; then echo at-head; else echo elsewhere; fi'
+          expect: not_equals("elsewhere")
+          message: "Tag v${version} must not already exist on another commit"
 
         - command: "git branch --show-current 2>/dev/null"
           expect: not_empty
           message: "Current branch (confirm you're on the right one)"
           severity: info
+    on_exit:
+      validate:
+        - command: 'test "$(git rev-parse -q --verify "refs/tags/v${version}^{commit}")" = "$(git rev-parse HEAD)" && echo tagged || echo untagged'
+          expect: equals("tagged")
+          message: "Tag v${version} must exist and point at HEAD"
+          only_to: [done]
 
   - id: done
     type: terminal
