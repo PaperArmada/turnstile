@@ -7,7 +7,28 @@ described in [STABILITY.md](STABILITY.md).
 
 ## [Unreleased]
 
+### Changed
+
+- **A blank parameter value counts as not provided (#51).** An empty or
+  whitespace-only value is replaced by the parameter's default when it has
+  one, and a blank required parameter is refused as missing. This applies
+  to `process_start`, to the values a `parameter_map` passes to subprocess
+  and dispatch children (a blank transition-metadata value no longer
+  replaces a non-blank parent value), and to the values gates see.
+  Breaking for callers that passed `""` to clear a non-empty default: that
+  is no longer possible.
+
 ### Fixed
+
+- **A blank `test_command` no longer passes the suite gates (#51).** Since
+  0.1.6 the "Test suite must pass" gates in bug-fix and feature-development
+  check the test command's exit status, and an explicitly empty or
+  whitespace-only `test_command` ran as `eval ""`, which exits 0, so the
+  gates passed without running a test. Blank values now take the
+  parameter's default (see Changed). Gates apply the same rule to stored
+  parameters, so an instance started on 0.1.6 with a blank `test_command`
+  runs the default at its next gate. A no-op value that is not blank
+  (`true`, `# TODO`) still runs and exits 0.
 
 - **Starter info checks report their fallback, and the baseline check
   reports a broken test command (#49).** Checks written as

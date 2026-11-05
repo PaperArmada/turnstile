@@ -14,6 +14,18 @@ logger = logging.getLogger(__name__)
 _UNRESOLVED_TEMPLATE_RE = re.compile(r"\$\{([^}]+)\}")
 
 
+def _is_unset(params: dict[str, str], name: str) -> bool:
+    """True if a parameter is absent, empty, or whitespace only.
+
+    A blank value counts as not provided, like the shell's ${name:-default}:
+    it takes the declared default, and a blank required parameter is
+    refused. Kept as given, an empty command-valued parameter ran as
+    `eval ""`, which exits 0 and passed exit-status suite gates (#51).
+    """
+    value = params.get(name)
+    return value is None or not str(value).strip()
+
+
 def _check_resolved(
     child_process: str,
     child_key: str,
@@ -367,15 +379,19 @@ class Engine:
         instead of the engine's project root. Defaults to the project root.
         """
         defn, def_hash = self._get_definition(name)
-        params = parameters or {}
+        params = dict(parameters or {})
 
         # Validate required parameters
         for p in defn.parameters:
-            if p.required and p.name not in params:
-                raise DefinitionError(
-                    f"Required parameter '{p.name}' not provided"
+            if p.required and _is_unset(params, p.name):
+                detail = (
+                    " (a blank value counts as not provided)"
+                    if p.name in params else ""
                 )
-            if p.name not in params and p.default is not None:
+                raise DefinitionError(
+                    f"Required parameter '{p.name}' not provided{detail}"
+                )
+            if _is_unset(params, p.name) and p.default is not None:
                 params[p.name] = p.default
 
         initial = defn.initial_state()
@@ -515,6 +531,12 @@ class Engine:
         environment-significant name (PATH, LD_PRELOAD, IFS, BASH_ENV, ...)
         into the gate shell by passing it as an extra parameter. The name
         boundary is the set of names the definition author declared.
+
+        A blank or missing value takes the declared default here too, not
+        only at start: an instance stored before blanks counted as not
+        provided (#51), or one whose definition gained a parameter since it
+        started, must not run gates with an empty value the start-time rule
+        would have replaced.
         """
         declared = {p.name for p in defn.parameters}
         params = {
@@ -522,6 +544,9 @@ class Engine:
             for key, value in instance.parameters.items()
             if key in declared
         }
+        for p in defn.parameters:
+            if _is_unset(params, p.name) and p.default is not None:
+                params[p.name] = p.default
         params["instance_id"] = instance.instance_id
         return params
 
@@ -1100,12 +1125,12 @@ class Engine:
         # Start the child process
         child_defn, child_hash = self._get_definition(state.process)
         for p in child_defn.parameters:
-            if p.required and p.name not in child_params:
+            if p.required and _is_unset(child_params, p.name):
                 raise SubprocessError(
                     f"Subprocess '{state.process}' requires parameter "
-                    f"'{p.name}' but it is not in parameter_map"
+                    f"'{p.name}' but parameter_map gives it no value (absent or blank)"
                 )
-            if p.name not in child_params and p.default is not None:
+            if _is_unset(child_params, p.name) and p.default is not None:
                 child_params[p.name] = p.default
 
         initial = child_defn.initial_state()
@@ -1166,8 +1191,12 @@ class Engine:
         """
         # Merge parent parameters with extra params from transition metadata
         param_context = dict(parent.parameters)
-        if extra_params:
-            param_context.update(extra_params)
+        for key, value in (extra_params or {}).items():
+            # A blank metadata value does not replace a parent value: blank
+            # counts as not provided (#51).
+            if _is_unset(extra_params, key) and not _is_unset(param_context, key):
+                continue
+            param_context[key] = value
 
         child_params: dict[str, str] = {}
         if state.parameter_map:
@@ -1178,12 +1207,12 @@ class Engine:
 
         child_defn, child_hash = self._get_definition(state.process)
         for p in child_defn.parameters:
-            if p.required and p.name not in child_params:
+            if p.required and _is_unset(child_params, p.name):
                 raise SubprocessError(
                     f"Dispatch process '{state.process}' requires parameter "
-                    f"'{p.name}' but it is not in parameter_map"
+                    f"'{p.name}' but parameter_map gives it no value (absent or blank)"
                 )
-            if p.name not in child_params and p.default is not None:
+            if _is_unset(child_params, p.name) and p.default is not None:
                 child_params[p.name] = p.default
 
         initial = child_defn.initial_state()

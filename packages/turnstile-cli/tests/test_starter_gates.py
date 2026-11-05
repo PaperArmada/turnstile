@@ -411,6 +411,42 @@ async def test_suite_gate_accepts_a_green_suite(tmp_path, gate):
     assert "3 passed" in result.output
 
 
+# eval of a blank command exits 0, so the gate itself cannot tell "no test
+# ran" from a green suite. The engine gives a blank test_command the
+# declared default instead (#51); this pins that for the shipped starters.
+@pytest.mark.parametrize("process", ["bug-fix", "feature-development"])
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_blank_test_command_starts_with_the_default(tmp_path, process, blank):
+    from turnstile_core.engine import Engine
+
+    processes = tmp_path / ".processes"
+    processes.mkdir()
+    (processes / f"{process}.yaml").write_text(STARTERS[f"{process}.yaml"])
+    required = "bug_summary" if process == "bug-fix" else "feature_name"
+    params = {"test_command": blank, required: "x"}
+    started = Engine(tmp_path).start(process, params)
+    assert started["parameters"]["test_command"] == "pytest"
+
+
+@pytest.mark.asyncio
+async def test_bug_fix_with_a_blank_test_command_cannot_skip_the_suite(tmp_path):
+    """End to end: the suite gate runs the default, which finds no tests
+    in an empty directory (or is not installed) and refuses `done`."""
+    from turnstile_core.engine import Engine
+
+    processes = tmp_path / ".processes"
+    processes.mkdir()
+    (processes / "bug-fix.yaml").write_text(STARTERS["bug-fix.yaml"])
+    engine = Engine(tmp_path)
+    iid = engine.start("bug-fix", {"bug_summary": "x", "test_command": ""})[
+        "instance_id"
+    ]
+    for state in ("reproduce", "diagnose", "fix", "verify"):
+        assert (await engine.transition(iid, state)).success
+    result = await engine.transition(iid, "done")
+    assert not result.success
+
+
 # ---------------------------------------------------------------------------
 # A fallback after a pipeline must be reachable (#49)
 # ---------------------------------------------------------------------------
@@ -470,14 +506,18 @@ def test_dead_fallback_scanner_rejects_unreachable_fallbacks(command):
     "command",
     [
         "git diff --stat HEAD 2>/dev/null | tail -1 | grep . || echo 'no changes'",
-        "out=$(git diff --stat HEAD 2>&1) || { printf '%s\\n' \"$out\"; exit 1; }; "
-        "printf '%s\\n' \"${out:-no changes}\" | tail -1",
+        (
+            "out=$(git diff --stat HEAD 2>&1) || { printf '%s\\n' \"$out\"; exit 1; }; "
+            "printf '%s\\n' \"${out:-no changes}\" | tail -1"
+        ),
         'test -n "$(cmd | tail -1)" || echo none',
         "ls .process-state/active/*.json 2>/dev/null | wc -l | tr -d ' '",
         'test -f x && echo exists || echo missing',
         "git log --oneline -5 2>/dev/null || echo 'not a git repo'",
-        "out=$(eval \"${test_command}\" 2>&1); status=$?; "
-        "printf '%s\\n' \"$out\" | tail -1; exit $status",
+        (
+            "out=$(eval \"${test_command}\" 2>&1); status=$?; "
+            "printf '%s\\n' \"$out\" | tail -1; exit $status"
+        ),
     ],
 )
 def test_dead_fallback_scanner_accepts_reachable_forms(command):

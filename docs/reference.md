@@ -146,6 +146,15 @@ states:
         - command: 'echo "Deployed ${branch_name} for ${ticket_id}"'
 ```
 
+A blank value (empty or whitespace only) is replaced by the parameter's
+`default` when it has one, like the shell's `${name:-default}`, and a
+blank `required` parameter is refused. The rule applies at start, to the
+values a `parameter_map` passes to subprocess and dispatch children, and
+to the values gates see. A blank transition-metadata value does not
+replace a non-blank parent value in a dispatch `parameter_map`. A value
+with any non-blank character is kept exactly as given, so a parameter
+with a default cannot be cleared by passing an empty string.
+
 An expansion is never parsed as shell syntax: a quoted one stays a single
 word, and an unquoted one is only split into words. A parameter that is
 itself a command, such as a test invocation, therefore loses any
@@ -168,6 +177,9 @@ states:
           expect: exit_code(0)
           message: "Test suite must pass"
 ```
+
+An `exit_code(0)` gate on an eval'd command proves only that the command
+succeeded: a no-op value such as `true` or `# TODO` also exits 0.
 
 Commands run under `/bin/sh`, which is `dash` on Debian and Ubuntu, so a
 command value must use POSIX syntax: `. .venv/bin/activate && pytest`, not
