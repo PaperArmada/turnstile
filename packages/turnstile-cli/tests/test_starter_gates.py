@@ -15,6 +15,11 @@ These tests read the gate commands from the shipped bundle
 regression in the YAML itself fails the behavioral tests. A structural sweep
 additionally rejects the single-quoted-placeholder anti-pattern anywhere a
 command appears, in both the bundle and the repo .processes/ source.
+
+Later sections pin further gate fixes: command-valued parameters run as
+shell syntax (#44), "Test suite must pass" gates check the suite's exit
+status, and info checks report a failing command instead of an
+unreachable fallback (#49).
 """
 
 import re
@@ -404,6 +409,221 @@ async def test_suite_gate_accepts_a_green_suite(tmp_path, gate):
     result = await run_validation(gate, {"test_command": green}, tmp_path)
     assert result.passed
     assert "3 passed" in result.output
+
+
+# ---------------------------------------------------------------------------
+# A fallback after a pipeline must be reachable (#49)
+# ---------------------------------------------------------------------------
+#
+# In `cmd | tail -1 || echo X` the fallback never runs: a pipeline's status
+# is its last stage's, and tail (like head, wc, sed, ...) exits 0 on empty
+# input. Info checks built this way recorded an empty, failed check exactly
+# when the fallback should have answered, and the baseline test check passed
+# on a test_command that could not run, because the shell's own "not found"
+# line satisfied not_empty. The checks now branch on the producing command's
+# own exit status: its failure is reported as a failed check showing the
+# error, and only a successful empty result prints the fallback.
+#
+# The sweep below is a regex over the common shapes, not a shell parser: a
+# fallback reached through a stage it does not list, or through constructs
+# it does not model, is not caught.
+
+_ALWAYS_ZERO_FILTER = (
+    r"(?:tail|head|wc|tr|sort|uniq|cut|sed|awk|cat|tee|jq|nl|paste|fold)"
+)
+_DEAD_FALLBACK_RE = re.compile(
+    # a pipe into a filter, allowing an env prefix or a path
+    r"\|\s*(?:\w+=\S*\s+)*(?:\S*/)?" + _ALWAYS_ZERO_FILTER + r"\b"
+    # its arguments: quoted strings and >& / &> redirections stay inside
+    r"(?:[^|;&'\"]|[0-9]?>&|&>|'[^']*'|\"[^\"]*\")*"
+    # optionally closing a { ...; } group, then the fallback operator
+    r"\s*(?:;\s*\}\s*)?\|\|"
+)
+
+
+def _has_dead_fallback(command: str) -> bool:
+    return bool(_DEAD_FALLBACK_RE.search(command))
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git diff --stat HEAD 2>/dev/null | tail -1 || echo 'no changes'",
+        "cmd --json 2>/dev/null | head -1 || echo '{}'",
+        "cmd 2>/dev/null | head -5 || echo 'no data'",
+        "(cmd | tail -1) || echo x",
+        "ls | wc -l || echo 0",
+        "cmd | tail -1 2>&1 || echo x",
+        "{ cmd | tail -1; } || echo x",
+        "cmd | tr -d '|' || echo x",
+        "cmd | /usr/bin/tail -1 || echo x",
+        "cmd | LC_ALL=C sort || echo x",
+        "cmd | head -1 | sed s/a/b/ || echo x",
+    ],
+)
+def test_dead_fallback_scanner_rejects_unreachable_fallbacks(command):
+    """Canary: a broken scanner would green the sweep silently."""
+    assert _has_dead_fallback(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git diff --stat HEAD 2>/dev/null | tail -1 | grep . || echo 'no changes'",
+        "out=$(git diff --stat HEAD 2>&1) || { printf '%s\\n' \"$out\"; exit 1; }; "
+        "printf '%s\\n' \"${out:-no changes}\" | tail -1",
+        'test -n "$(cmd | tail -1)" || echo none',
+        "ls .process-state/active/*.json 2>/dev/null | wc -l | tr -d ' '",
+        'test -f x && echo exists || echo missing',
+        "git log --oneline -5 2>/dev/null || echo 'not a git repo'",
+        "out=$(eval \"${test_command}\" 2>&1); status=$?; "
+        "printf '%s\\n' \"$out\" | tail -1; exit $status",
+    ],
+)
+def test_dead_fallback_scanner_accepts_reachable_forms(command):
+    assert not _has_dead_fallback(command)
+
+
+def test_no_command_has_an_unreachable_pipeline_fallback():
+    offenders = [
+        (source, command)
+        for source, command in _all_commands()
+        if _has_dead_fallback(command)
+    ]
+    assert offenders == [], (
+        "a fallback after '| tail' (head, sed, ...) never runs; branch on "
+        f"the producing command's exit status instead: {offenders}"
+    )
+
+
+def _rule(process: str, state_id: str, message: str) -> ValidationRule:
+    state = _state(_starter(process), state_id)
+    rules = [
+        r
+        for hook in ("on_enter", "on_exit")
+        for r in (state.get(hook) or {}).get("validate") or []
+        if r.get("message") == message
+    ]
+    assert len(rules) == 1, f"{process}/{state_id}: {message!r}"
+    return ValidationRule(**rules[0])
+
+
+# (rule, fallback text). The code-review rules diff base_branch...branch;
+# the others diff the working tree against HEAD.
+CHANGE_SUMMARY_RULES = [
+    pytest.param(
+        _rule("feature-development", "test", "Changes since last commit"),
+        "no changes",
+        id="feature-development/test",
+    ),
+    pytest.param(
+        _rule("bug-fix", "diagnose", "Files changed so far (investigation artifacts)"),
+        "no changes",
+        id="bug-fix/diagnose",
+    ),
+    pytest.param(
+        _rule("spike", "write_up", "Changes made during investigation"),
+        "no changes",
+        id="spike/write_up",
+    ),
+    pytest.param(
+        _rule(
+            "code-review",
+            "survey",
+            "Change summary (files changed, insertions, deletions)",
+        ),
+        "no diff available",
+        id="code-review/survey",
+    ),
+    pytest.param(
+        _rule(
+            "code-review",
+            "request_changes",
+            "Current state of changes (has author addressed feedback?)",
+        ),
+        "no diff",
+        id="code-review/request_changes",
+    ),
+]
+
+
+@pytest.fixture
+def clean_repo(tmp_path):
+    _git(tmp_path, "init", "-q", "-b", "main")
+    (tmp_path / "a.txt").write_text("one\n")
+    _git(tmp_path, "add", "a.txt")
+    _git(tmp_path, "commit", "-q", "-m", "init")
+    return tmp_path
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rule,fallback", CHANGE_SUMMARY_RULES)
+async def test_change_summary_reports_its_fallback_when_nothing_changed(
+    clean_repo, rule, fallback
+):
+    params = {"base_branch": "main", "branch": "main"}
+    result = await run_validation(rule, params, clean_repo)
+    assert result.passed
+    assert result.output == fallback
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rule,fallback", CHANGE_SUMMARY_RULES)
+async def test_change_summary_reports_the_diff_when_something_changed(
+    clean_repo, rule, fallback
+):
+    _git(clean_repo, "checkout", "-q", "-b", "feat")
+    (clean_repo / "a.txt").write_text("two\n")
+    _git(clean_repo, "commit", "-q", "-am", "change")
+    (clean_repo / "a.txt").write_text("three\n")
+    params = {"base_branch": "main", "branch": "feat"}
+    result = await run_validation(rule, params, clean_repo)
+    assert result.passed
+    assert result.output.startswith("1 file changed")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rule,fallback", CHANGE_SUMMARY_RULES)
+async def test_change_summary_reports_a_git_failure_not_its_fallback(
+    tmp_path, rule, fallback
+):
+    params = {"base_branch": "main", "branch": "main"}
+    result = await run_validation(rule, params, tmp_path)  # not a repository
+    assert not result.passed
+    assert "not a git repository" in result.output.lower()
+    assert "\n" not in result.output  # the first line, not a usage dump
+
+
+BASELINE_RULE = _rule(
+    "feature-development",
+    "understand",
+    "Current test suite status (baseline before changes)",
+)
+
+
+@pytest.mark.asyncio
+async def test_baseline_fails_when_test_command_cannot_run(tmp_path):
+    result = await run_validation(
+        BASELINE_RULE, {"test_command": "turnstile_no_such_command_49"}, tmp_path
+    )
+    assert not result.passed
+    assert "not found" in result.output
+
+
+@pytest.mark.asyncio
+async def test_baseline_fails_on_a_red_suite_and_shows_its_summary(tmp_path):
+    red = "echo '=== 1 failed, 3 passed in 0.10s ==='; exit 1"
+    result = await run_validation(BASELINE_RULE, {"test_command": red}, tmp_path)
+    assert not result.passed
+    assert "1 failed, 3 passed" in result.output
+
+
+@pytest.mark.asyncio
+async def test_baseline_passes_on_a_green_suite(tmp_path):
+    green = "echo '=== 3 passed in 0.10s ==='"
+    result = await run_validation(BASELINE_RULE, {"test_command": green}, tmp_path)
+    assert result.passed
+    assert result.output == "=== 3 passed in 0.10s ==="
 
 
 # Parameters whose value is, by contract, a shell command the instance

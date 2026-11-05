@@ -1,6 +1,6 @@
 name: code-review
 description: "Structured review of a changeset or pull request"
-version: "1.1.0"
+version: "1.1.1"
 
 metadata:
   author: "turnstile"
@@ -36,8 +36,8 @@ states:
           message: "Commits in this changeset"
           severity: info
 
-        - command: "git diff --stat ${base_branch}...${branch} 2>/dev/null | tail -1 || echo 'no diff available'"
-          expect: not_empty
+        - command: "out=$(git diff --stat ${base_branch}...${branch} 2>&1) || { printf '%s\\n' \"$out\" | head -1; exit 1; }; printf '%s\\n' \"${out:-no diff available}\" | tail -1"
+          expect: exit_code(0)
           message: "Change summary (files changed, insertions, deletions)"
           severity: info
 
@@ -59,8 +59,8 @@ states:
     transitions: [review]
     on_enter:
       validate:
-        - command: "git diff --stat ${base_branch}...${branch} 2>/dev/null | tail -1 || echo 'no diff'"
-          expect: not_empty
+        - command: "out=$(git diff --stat ${base_branch}...${branch} 2>&1) || { printf '%s\\n' \"$out\" | head -1; exit 1; }; printf '%s\\n' \"${out:-no diff}\" | tail -1"
+          expect: exit_code(0)
           message: "Current state of changes (has author addressed feedback?)"
           severity: info
 

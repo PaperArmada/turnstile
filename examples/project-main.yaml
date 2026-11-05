@@ -1,6 +1,6 @@
 name: project-main
 description: "Persistent project coordinator: triage, dispatch, review, govern"
-version: "1.0.0"
+version: "1.0.1"
 
 metadata:
   author: "turnstile"
@@ -39,16 +39,16 @@ states:
           expect: not_empty
           message: "Active process instances"
           severity: info
-        - command: "turnstile check-completed feature-development --parent ${instance_id} --include-active --json 2>/dev/null | head -1 || echo '{}'"
-          expect: not_empty
+        - command: "out=$(turnstile check-completed feature-development --parent \"${instance_id}\" --include-active --json 2>&1); [ $? -le 1 ] || { printf '%s\\n' \"$out\" | head -1; exit 1; }; printf '%s\\n' \"$out\" | python3 -c 'import sys, json; print(len(json.load(sys.stdin)[\"matches\"]), \"matching\")'"
+          expect: exit_code(0)
           message: "Dispatched feature work status"
           severity: info
-        - command: "turnstile check-completed bug-fix --parent ${instance_id} --include-active --json 2>/dev/null | head -1 || echo '{}'"
-          expect: not_empty
+        - command: "out=$(turnstile check-completed bug-fix --parent \"${instance_id}\" --include-active --json 2>&1); [ $? -le 1 ] || { printf '%s\\n' \"$out\" | head -1; exit 1; }; printf '%s\\n' \"$out\" | python3 -c 'import sys, json; print(len(json.load(sys.stdin)[\"matches\"]), \"matching\")'"
+          expect: exit_code(0)
           message: "Dispatched bug fix status"
           severity: info
-        - command: "turnstile check-completed spike --parent ${instance_id} --include-active --json 2>/dev/null | head -1 || echo '{}'"
-          expect: not_empty
+        - command: "out=$(turnstile check-completed spike --parent \"${instance_id}\" --include-active --json 2>&1); [ $? -le 1 ] || { printf '%s\\n' \"$out\" | head -1; exit 1; }; printf '%s\\n' \"$out\" | python3 -c 'import sys, json; print(len(json.load(sys.stdin)[\"matches\"]), \"matching\")'"
+          expect: exit_code(0)
           message: "Dispatched spike status"
           severity: info
 

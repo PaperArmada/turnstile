@@ -1,6 +1,6 @@
 name: bug-fix
 description: "Structured bug fix workflow: reproduce, diagnose, fix, verify"
-version: "1.4.0"
+version: "1.4.1"
 
 metadata:
   author: "turnstile"
@@ -50,8 +50,8 @@ states:
     transitions: [fix, reproduce, abandoned]
     on_enter:
       validate:
-        - command: "git diff --stat HEAD 2>/dev/null | tail -1 || echo 'no changes'"
-          expect: not_empty
+        - command: "out=$(git diff --stat HEAD 2>&1) || { printf '%s\\n' \"$out\" | head -1; exit 1; }; printf '%s\\n' \"${out:-no changes}\" | tail -1"
+          expect: exit_code(0)
           message: "Files changed so far (investigation artifacts)"
           severity: info
 

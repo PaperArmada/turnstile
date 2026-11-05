@@ -1,6 +1,6 @@
 name: spike
 description: "Time-boxed investigation with a written outcome"
-version: "1.1.0"
+version: "1.1.1"
 
 metadata:
   author: "turnstile"
@@ -39,8 +39,8 @@ states:
     transitions: [done, investigate]
     on_enter:
       validate:
-        - command: "git diff --stat HEAD 2>/dev/null | tail -1 || echo 'no changes'"
-          expect: not_empty
+        - command: "out=$(git diff --stat HEAD 2>&1) || { printf '%s\\n' \"$out\" | head -1; exit 1; }; printf '%s\\n' \"${out:-no changes}\" | tail -1"
+          expect: exit_code(0)
           message: "Changes made during investigation"
           severity: info
     on_exit:

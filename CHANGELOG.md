@@ -7,6 +7,24 @@ described in [STABILITY.md](STABILITY.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Starter info checks report their fallback, and the baseline check
+  reports a broken test command (#49).** Checks written as
+  `cmd | tail -1 || echo X` never printed `X`: a pipeline's status is its
+  last stage's, and `tail` exits 0 on empty input. The change-summary
+  checks in feature-development, bug-fix, spike and code-review recorded
+  an empty, failed check when nothing had changed. They now branch on
+  git's exit status: an unchanged tree reports `no changes` (code-review:
+  `no diff available` / `no diff`), and a git failure (not a repository,
+  no commits yet, an unknown branch) is a failed check showing git's
+  error. The feature-development baseline check passed whenever the test
+  command printed anything, including the shell's `not found` error; it
+  now records the suite's exit status, so a red baseline or a test command
+  that cannot run shows as a failed advisory. feature-development 1.5.1,
+  bug-fix 1.4.1, spike 1.1.1, code-review 1.1.1. Existing projects receive
+  the change through `turnstile update --apply`.
+
 ## [0.1.6] - 2026-10-27
 
 ### Added

@@ -1,6 +1,6 @@
 name: feature-development
 description: "Standard feature development workflow"
-version: "1.5.0"
+version: "1.5.1"
 
 metadata:
   author: "matt"
@@ -45,8 +45,11 @@ states:
 
         # eval: test_command is a shell command by contract, so the shell must
         # parse it (env prefixes, quotes, pipes). Never eval a data parameter.
-        - command: "eval \"${test_command}\" 2>&1 | tail -1 || echo 'no test output'"
-          expect: not_empty
+        # Report on the suite's exit status, not on whether it printed
+        # something: a test_command that cannot run prints a shell error.
+        # A failure here means the baseline is red or test_command is wrong.
+        - command: "out=$(eval \"${test_command}\" 2>&1); status=$?; printf '%s\\n' \"$out\" | tail -1; exit $status"
+          expect: exit_code(0)
           message: "Current test suite status (baseline before changes)"
           severity: info
 
@@ -65,8 +68,8 @@ states:
     on_enter:
       validate:
         # Render don't record: query git for what actually changed
-        - command: "git diff --stat HEAD 2>/dev/null | tail -1 || echo 'no changes'"
-          expect: not_empty
+        - command: "out=$(git diff --stat HEAD 2>&1) || { printf '%s\\n' \"$out\" | head -1; exit 1; }; printf '%s\\n' \"${out:-no changes}\" | tail -1"
+          expect: exit_code(0)
           message: "Changes since last commit"
           severity: info
 
