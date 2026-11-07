@@ -302,6 +302,25 @@ turnstile hooks uninstall pre-push
 # Scaffold a shared process package
 turnstile init-package my-processes -P release -P review
 
+# Upgrade the starter definitions to the installed CLI's release.
+# Replaces only unedited copies (recorded in .processes/.starters.lock
+# or shipped by an earlier release), installs and registers new starters,
+# and re-pins .mcp.json and .claude/settings.json from an older release
+# tag. Kept: edited copies, copies newer than the release, new starters
+# whose filename another file uses, new starters an unreadable extends
+# source may provide, and writes that would leave an active instance
+# without its definition or state. Before writing, the loader is run over
+# the result: a write that would leave the definitions unloadable is held
+# back even with --force. --apply fetches git extends sources first (the
+# preview does not), and refuses when another extends source or a file the
+# loader reads cannot be read, as the result could not be checked. It
+# writes everything or nothing.
+turnstile update                        # show the plan
+turnstile update --apply                # apply it
+turnstile update --diff                 # show what kept definitions would change
+turnstile update --apply --force spike  # replace a kept definition
+turnstile update --ref main             # compare with a branch instead (no re-pin)
+
 # Enforcement
 turnstile enforce status
 turnstile enforce on
@@ -544,4 +563,4 @@ Meta (processes for managing processes):
 
 Each process uses info-severity gates to surface relevant context (recent commits, diff stats, working tree status) and back-transitions for forgiveness. They are generic by design, using git as the common denominator rather than project-specific tooling.
 
-To use the starter pack in your project, copy the desired YAML files from `.processes/` or reference them via the registry `extends` field. Additional definitions that showcase specific engine features (branching, dispatch, wait states) live in [`examples/`](../examples/).
+`turnstile init` installs the starter pack into your project's `.processes/`, and `turnstile update` upgrades it to a later release (see [CLI](#cli)). You can also copy individual YAML files from `.processes/` or reference them via the registry `extends` field. Additional definitions that showcase specific engine features (branching, dispatch, wait states) live in [`examples/`](../examples/).

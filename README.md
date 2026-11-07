@@ -41,7 +41,13 @@ uvx --python 3.12 --from "turnstile-cli @ git+https://github.com/PaperArmada/tur
 
 This generates the MCP server config, registry, Claude Code guard hook, and a gitignore entry for runtime state; process definitions already in `.processes/` are registered automatically. Enforcement starts in monitor mode (warnings only; `turnstile enforce off` disables it). Restart Claude Code and the process tools are available.
 
-The generated config pins to a release tag (`@v0.1.6`), so installs are reproducible. To upgrade, bump the tag in `.mcp.json` and `.claude/settings.json` and run `uvx --refresh`, then refresh the starter definitions with `turnstile update --apply`.
+The generated config pins to a release tag (`@v0.1.6`), so installs are reproducible. To upgrade, run the new release's CLI in your project, with `<tag>` the release to move to:
+
+```bash
+uvx --python 3.12 --from "turnstile-cli @ git+https://github.com/PaperArmada/turnstile.git@<tag>#subdirectory=packages/turnstile-cli" turnstile update --apply
+```
+
+It replaces the starter definitions you have not edited, keeps the ones you have (`--diff` shows what they would change, `--force NAME` replaces one), installs starters new in that release, and re-pins `.mcp.json` and `.claude/settings.json` to it; restart Claude Code afterwards. Without `--apply` it only shows the plan. `turnstile init` records the installed starters in `.processes/.starters.lock`: commit that file so every clone tells edited copies from unedited ones the same way.
 
 For the full walkthrough (writing a process, driving it from an agent, and skipping a state), see [docs/quickstart.md](docs/quickstart.md).
 

@@ -22,7 +22,9 @@ from turnstile_core.admin import (
 from turnstile_core.engine import Engine
 from turnstile_core.graph import analyze as graph_analyze
 
+from turnstile_cli import upgrade
 from turnstile_cli.claude_adapter import (
+    TURNSTILE_REF,
     _find_turnstile_root,
     _load_settings,
     install_enforcement,
@@ -39,6 +41,7 @@ from turnstile_core.loader import (
     load_registry,
     update_registry_enforcement,
 )
+from turnstile_core.persistence import ProcessInstance
 from turnstile_core.schema import export_schemas
 from turnstile_core.template import scaffold_package
 
@@ -1030,112 +1033,77 @@ def _clone_source(repo_url: str, ref: str = "") -> Path:
     return Path(tmp)
 
 
-def _load_version(path: Path) -> str | None:
-    """Load just the version from a YAML definition file."""
-    try:
-        defn = load_definition(path)
-        return defn.version
-    except Exception:
-        return None
+def _read_bundle(source_dir: Path) -> dict[str, str]:
+    """filename -> content for the definitions in a source .processes/."""
+    return {
+        p.name: p.read_text()
+        for p in sorted(source_dir.glob("*.yaml"))
+        if p.name != "registry.yaml"
+    }
 
 
-def _compare_definitions(
-    local_dir: Path, source_dir: Path
-) -> list[dict[str, str]]:
-    """Compare local and source process definitions by version.
+def _active_instances(root: Path) -> tuple[list, list[Path]]:
+    """Active instances and unreadable state files.
 
-    Returns a list of dicts with keys: name, local_version, source_version,
-    status (up-to-date, update-available, local-only, new).
+    Reads the active directory directly: constructing a StateStore would
+    create the state directories, and the preview must write nothing.
     """
-    results = []
+    try:
+        state_dir = root / load_registry(root).settings.state_dir
+    except Exception:
+        state_dir = root / ".process-state"
+    instances: list[ProcessInstance] = []
+    corrupt: list[Path] = []
+    for path in sorted((state_dir / "active").glob("*.json")):
+        try:
+            instances.append(ProcessInstance(**json.loads(path.read_text())))
+        except Exception:
+            corrupt.append(path)
+    return instances, corrupt
 
-    # Collect source definitions
-    source_defs: dict[str, Path] = {}
-    if source_dir.exists():
-        for path in sorted(source_dir.glob("*.yaml")):
-            if path.name == "registry.yaml":
-                continue
-            try:
-                defn = load_definition(path)
-                source_defs[defn.name] = path
-            except Exception:
-                continue
 
-    # Collect local definitions
-    local_defs: dict[str, Path] = {}
-    if local_dir.exists():
-        for path in sorted(local_dir.glob("*.yaml")):
-            if path.name == "registry.yaml":
-                continue
-            try:
-                defn = load_definition(path)
-                local_defs[defn.name] = path
-            except Exception:
-                continue
-
-    # Compare
-    all_names = sorted(set(list(source_defs.keys()) + list(local_defs.keys())))
-    for name in all_names:
-        local_path = local_defs.get(name)
-        source_path = source_defs.get(name)
-
-        if local_path and source_path:
-            local_ver = _load_version(local_path) or "?"
-            source_ver = _load_version(source_path) or "?"
-            if local_ver == source_ver:
-                # Check if content differs even with same version
-                local_content = local_path.read_text()
-                source_content = source_path.read_text()
-                if local_content == source_content:
-                    status = "up-to-date"
-                else:
-                    status = "modified"
-            else:
-                status = "update-available"
-            results.append({
-                "name": name,
-                "local_version": local_ver,
-                "source_version": source_ver,
-                "local_path": str(local_path),
-                "source_path": str(source_path),
-                "status": status,
-            })
-        elif local_path:
-            local_ver = _load_version(local_path) or "?"
-            results.append({
-                "name": name,
-                "local_version": local_ver,
-                "source_version": "-",
-                "local_path": str(local_path),
-                "source_path": "",
-                "status": "local-only",
-            })
-        elif source_path:
-            source_ver = _load_version(source_path) or "?"
-            results.append({
-                "name": name,
-                "local_version": "-",
-                "source_version": source_ver,
-                "local_path": "",
-                "source_path": str(source_path),
-                "status": "new",
-            })
-
-    return results
+_STATUS_LABELS = {
+    upgrade.UP_TO_DATE: "up to date",
+    upgrade.APPLY: "update",
+    upgrade.NEW: "new",
+    upgrade.EDITED: "edited locally (kept)",
+    upgrade.LOCAL_NEWER: "local copy newer (kept)",
+    upgrade.REMOVED: "deleted locally (not reinstalled)",
+    upgrade.BLOCKED: "blocked (kept)",
+    upgrade.CONFLICT: "file in the way (kept)",
+    upgrade.UNVERIFIED: "not checked (kept)",
+    upgrade.EXTERNAL: "from an extended source",
+    upgrade.LOCAL_ONLY: "local only",
+}
 
 
 @cli.command()
 @click.option(
     "--repo", default=None,
-    help="Git repo URL (defaults to PaperArmada/turnstile).",
+    help="Fetch definitions from this git repo instead of the bundled release.",
 )
 @click.option(
     "--ref", default="",
-    help="Git ref to fetch (branch, tag). Defaults to the repo's default branch.",
+    help="Git ref to fetch (branch, tag). Implies fetching from --repo "
+    "(default PaperArmada/turnstile).",
 )
 @click.option(
     "--apply", "do_apply", is_flag=True, default=False,
-    help="Apply updates (overwrite local files with source versions).",
+    help="Replace unedited definitions, install new ones, and re-pin the "
+    "generated configs to this release.",
+)
+@click.option(
+    "--force", "force", multiple=True, metavar="NAME",
+    help="Write this definition even if it is kept (edited, newer locally, "
+    "blocked by an active instance, a regular file in the way, or possibly "
+    "supplied by an extends source that cannot be read), deleted locally, "
+    "or supplied by an extends source (repeatable). Never writes through a "
+    "symbolic link, an unchecked plan, or one that would leave the "
+    "definitions unloadable.",
+)
+@click.option(
+    "--diff", "show_diff", is_flag=True, default=False,
+    help="Show the changes for definitions that are kept.",
 )
 @click.option(
     "--principles", "update_principles", is_flag=True, default=False,
@@ -1143,7 +1111,7 @@ def _compare_definitions(
 )
 @click.option(
     "--dev", is_flag=True, default=False,
-    help="Use local turnstile repo instead of cloning from git.",
+    help="Use local turnstile repo instead of the bundled release.",
 )
 @click.option(
     "--turnstile-dir", default=None,
@@ -1155,22 +1123,42 @@ def update(
     repo: str | None,
     ref: str,
     do_apply: bool,
+    force: tuple[str, ...],
+    show_diff: bool,
     update_principles: bool,
     dev: bool,
     turnstile_dir: str | None,
 ) -> None:
-    """Check for and apply updates to process definitions.
+    """Upgrade the starter definitions to this release.
 
-    Compares local .processes/*.yaml files against the source repo and
-    shows which definitions have newer versions available. By default,
-    only shows a comparison table. Use --apply to overwrite local files.
+    Compares .processes/ with the starter definitions bundled in this
+    turnstile release and shows what --apply would do. --apply replaces
+    only unedited copies (content matching .processes/.starters.lock or a
+    released version), installs new starters, records the result in the
+    manifest, and re-pins .mcp.json and .claude/settings.json from an older
+    release tag to this release. Kept: edited copies, copies newer than
+    this release, new starters whose filename another file uses, starters
+    that an unreadable extends source may provide, and writes that would
+    leave an active instance without its definition or state. --diff shows
+    what they would change and --force NAME writes one. The plan is checked
+    with the loader first: a write that would leave the definitions
+    unloadable is never made, and --apply refuses (exit 1) when no write
+    can be held back to fix the result. --apply fetches git extends
+    sources before checking, refuses when another extends source or a file
+    the loader reads cannot be read, and writes everything or nothing.
+
+    To upgrade, run the new release's CLI:
+
+    \b
+      uvx --python 3.12 --from "turnstile-cli @ git+<repo>@<tag>#subdirectory=packages/turnstile-cli" turnstile update --apply
 
     \b
     Examples:
-      turnstile update                  # Show what's available
-      turnstile update --apply          # Apply definition updates
-      turnstile update --principles     # Also refresh design principles
-      turnstile update --dev            # Use local repo instead of git
+      turnstile update                  # Show what would change
+      turnstile update --apply          # Upgrade to this release
+      turnstile update --diff           # Show changes to kept definitions
+      turnstile update --apply --force bug-fix
+      turnstile update --ref main       # Compare with a branch instead
     """
     root = Path(ctx.obj["project"]) if ctx.obj.get("project") else Path.cwd()
     local_dir = root / ".processes"
@@ -1182,13 +1170,17 @@ def update(
         )
         raise SystemExit(1)
 
-    # Resolve source directory
+    # Resolve the source bundle. Only the bundled release is release-scoped,
+    # so only it re-pins the generated configs.
     source_tmp: Path | None = None
+    bundled = not (dev or repo or ref)
     try:
-        if dev:
-            source_root = Path(
-                turnstile_dir or _find_turnstile_root()
-            )
+        if bundled:
+            bundle = dict(STARTERS)
+            release = TURNSTILE_REF
+            click.echo(f"Source: starters bundled with turnstile {release}")
+        elif dev:
+            source_root = Path(turnstile_dir or _find_turnstile_root())
             source_dir = source_root / ".processes"
             if not source_dir.exists():
                 click.echo(
@@ -1196,9 +1188,12 @@ def update(
                     err=True,
                 )
                 raise SystemExit(1)
+            bundle = _read_bundle(source_dir)
+            release = "dev"
+            click.echo(f"Source: {source_dir}")
         else:
             repo_url = repo or TURNSTILE_REPO_URL
-            click.echo(f"Fetching from {repo_url}...")
+            click.echo(f"Fetching from {repo_url}{'@' + ref if ref else ''}...")
             try:
                 source_tmp = _clone_source(repo_url, ref)
             except subprocess.CalledProcessError as e:
@@ -1210,38 +1205,79 @@ def update(
             except FileNotFoundError:
                 click.echo("git is not installed or not in PATH", err=True)
                 raise SystemExit(1)
-            source_dir = source_tmp / ".processes"
+            bundle = _read_bundle(source_tmp / ".processes")
+            release = ref or "default-branch"
 
-        # Compare definitions
-        comparisons = _compare_definitions(local_dir, source_dir)
-
-        if not comparisons:
-            click.echo("No process definitions found to compare.")
-            return
-
-        # Display comparison table
-        has_updates = False
-        click.echo(f"\n{'Name':<25} {'Local':<12} {'Source':<12} Status")
-        click.echo("-" * 65)
-        for c in comparisons:
-            status_display = c["status"]
-            if c["status"] == "update-available":
-                status_display = "UPDATE AVAILABLE"
-                has_updates = True
-            elif c["status"] == "modified":
-                status_display = "content differs (same version)"
-                has_updates = True
-            elif c["status"] == "new":
-                status_display = "new in source"
-                has_updates = True
-            elif c["status"] == "local-only":
-                status_display = "local only"
+        if do_apply:
+            # The check reads git extends sources from the loader's cache;
+            # refresh it first, as any command that loads definitions does.
+            failed = upgrade.fetch_git_sources(local_dir, on_fetch=lambda src: click.echo(
+                f"Fetching extends source {upgrade.redact(src)}..."
+            ))
+            if failed:
+                for src, error in failed:
+                    click.echo(f"Failed to fetch {src}: {error}", err=True)
+                click.echo("Refusing to apply: the result cannot be checked.", err=True)
+                raise SystemExit(1)
+        instances, corrupt = _active_instances(root)
+        plan = upgrade.plan_update(
+            local_dir, bundle, instances, frozenset(force), fetched=do_apply
+        )
+        for warning in plan.warnings:
+            click.echo(f"Warning: {warning}", err=True)
+        if corrupt:
             click.echo(
-                f"  {c['name']:<23} {c['local_version']:<12} "
-                f"{c['source_version']:<12} {status_display}"
+                f"Warning: {len(corrupt)} unreadable instance file(s) in the "
+                "state directory; their states were not checked",
+                err=True,
+            )
+        unknown = set(force) - {e.name for e in plan.entries}
+        if unknown:
+            click.echo(
+                f"Warning: --force names no known definition: "
+                f"{', '.join(sorted(unknown))}",
+                err=True,
             )
 
-        # Check principles
+        # Display the plan
+        click.echo(f"\n{'Name':<25} {'Local':<12} {'Source':<12} Status")
+        click.echo("-" * 65)
+        for e in plan.entries:
+            label = _STATUS_LABELS[e.status]
+            if e.forced:
+                label += " (forced)"
+            click.echo(
+                f"  {e.name:<23} {e.local_version:<12} "
+                f"{e.source_version:<12} {label}"
+            )
+            if e.detail and (e.forced or e.status in (
+                upgrade.BLOCKED, upgrade.CONFLICT, upgrade.EXTERNAL, upgrade.UNVERIFIED
+            )):
+                click.echo(f"      {e.detail}")
+            if e.stranded:
+                click.echo(
+                    "      leaves active instance(s) without their definition "
+                    "or state: " + ", ".join(e.stranded)
+                )
+
+        if show_diff:
+            for e in plan.entries:
+                if e.status in upgrade.KEPT:
+                    click.echo(f"\n{upgrade.diff(e)}", nl=False)
+
+        # Pins in the generated configs (uvx mode only)
+        pin_plan = upgrade.plan_repins(root, release) if bundled else []
+        stale_pins = [c for c in pin_plan if c.action == "repin"]
+        if stale_pins:
+            click.echo(
+                f"\nConfig pins to re-pin to {release}: "
+                + "; ".join(f"{c.path} ({c.old})" for c in stale_pins)
+            )
+        for c in pin_plan:
+            if c.action == "keep":
+                click.echo(f"Config pin kept: {c.path} ({c.old}): {c.reason}")
+
+        # Principles
         principles_dir = local_dir / "principles"
         principles_stale = False
         if principles_dir.exists():
@@ -1252,49 +1288,92 @@ def update(
                     break
         elif PRINCIPLES:
             principles_stale = True
+        click.echo(
+            "\nDesign principles: "
+            + ("updates available" if principles_stale else "up to date")
+        )
 
-        if principles_stale:
-            click.echo(f"\nDesign principles: updates available")
-        else:
-            click.echo(f"\nDesign principles: up to date")
+        if plan.skipped:
+            click.echo(
+                f"\nKept {len(plan.skipped)} definition(s); "
+                "--diff shows the changes, --force NAME replaces one."
+            )
 
-        if not has_updates and not principles_stale:
+        if plan.unchecked:
+            click.echo(f"\n{plan.unchecked}", err=True)
+        if plan.unsafe or (do_apply and plan.unchecked):
+            reason = plan.unsafe or plan.unchecked
+            if do_apply:
+                click.echo(f"\nRefusing to apply: {reason}", err=True)
+                raise SystemExit(1)
+            click.echo(f"\n--apply would refuse: {reason}", err=True)
+
+        if not plan.writes and not stale_pins and not principles_stale:
             click.echo("\nEverything is up to date.")
             return
 
         if not do_apply and not update_principles:
             click.echo(
+                "\nRun with --principles to update principles."
+                if plan.unsafe else
                 "\nRun with --apply to update definitions"
                 " or --principles to update principles."
             )
             return
 
-        # Apply updates
         updated = 0
         if do_apply:
-            for c in comparisons:
-                if c["status"] in ("update-available", "modified", "new"):
-                    source_path = Path(c["source_path"])
-                    if c["status"] == "new":
-                        target = local_dir / source_path.name
-                    else:
-                        target = Path(c["local_path"])
-                    shutil.copy2(source_path, target)
-                    click.echo(f"  Updated: {target.name}")
-                    updated += 1
+            # Only files installed for a definition no local file declared
+            # are registered: an existing file left out of `local:` stays
+            # out. All of it is written, or nothing is.
+            try:
+                written = upgrade.apply_plan(local_dir, plan, release, register=True)
+            except OSError as e:
+                click.echo(f"Nothing was written: {e}", err=True)
+                raise SystemExit(1)
+            for e in written:
+                click.echo(f"  Updated: {(e.local_path or local_dir / e.filename).name}")
+                if e.affected:
+                    click.echo(
+                        f"    active instance(s) now run this version: "
+                        f"{', '.join(e.affected)}"
+                    )
+                if e.stranded:
+                    click.echo(
+                        "    active instance(s) left without their definition "
+                        f"or state: {', '.join(e.stranded)}"
+                    )
+            updated += len(written)
+            if plan.registered:
+                click.echo(f"  Registered in registry.yaml: {', '.join(plan.registered)}")
+            if plan.register_warning:
+                click.echo(f"Warning: {plan.register_warning}", err=True)
+            click.echo(f"  Recorded: .processes/{upgrade.MANIFEST_NAME}")
+            if bundled:
+                repinned = [
+                    c for c in upgrade.repin(root, release) if c.action == "repin"
+                ]
+                for c in repinned:
+                    click.echo(f"  Re-pinned: {c.path} ({c.old} -> {release})")
+                updated += len({c.path for c in repinned})
+                if repinned:
+                    click.echo(
+                        "\nRestart Claude Code (or run /mcp reconnect) to load "
+                        f"turnstile {release}."
+                    )
 
         if update_principles:
             if not principles_dir.exists():
                 principles_dir.mkdir(parents=True)
-            written = 0
+            written_principles = 0
             for name, content in PRINCIPLES.items():
                 target = principles_dir / f"{name}.md"
                 if not target.exists() or target.read_text() != content:
                     target.write_text(content)
-                    written += 1
-            if written:
-                click.echo(f"  Updated: {written} principle(s)")
-                updated += written
+                    written_principles += 1
+            if written_principles:
+                click.echo(f"  Updated: {written_principles} principle(s)")
+                updated += written_principles
 
         if updated:
             click.echo(f"\n{updated} file(s) updated.")
@@ -1385,6 +1464,10 @@ def init(
             created.append(
                 f".processes/ ({starters_written} starter definitions)"
             )
+        # Record what is installed so `turnstile update` can tell unedited
+        # copies from edited ones. Meant to be committed.
+        if upgrade.record_installed(proc_dir, STARTERS, TURNSTILE_REF):
+            created.append(f".processes/{upgrade.MANIFEST_NAME}")
 
         # Design principles
         principles_dir = proc_dir / "principles"

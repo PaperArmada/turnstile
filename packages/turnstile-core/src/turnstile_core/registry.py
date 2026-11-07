@@ -95,11 +95,27 @@ def _resolve_local(location: str, project_root: Path) -> Path:
     )
 
 
+def _git_repo_dir(url: str, cache_dir: Path) -> Path:
+    """The cache directory a git source is cloned into."""
+    safe_name = url.replace("://", "_").replace("/", "_").replace(".", "_")
+    return cache_dir / "git" / safe_name
+
+
+def _git_processes_dir(repo_dir: Path) -> Path:
+    processes_dir = repo_dir / "processes"
+    return processes_dir if processes_dir.is_dir() else repo_dir
+
+
+def cached_git_source(url: str, cache_dir: Path) -> Path | None:
+    """The directory a git source resolved to at its last fetch, or None
+    when it has not been cloned. Does no git or network I/O."""
+    repo_dir = _git_repo_dir(url, cache_dir)
+    return _git_processes_dir(repo_dir) if repo_dir.is_dir() else None
+
+
 def _resolve_git(url: str, ref: str, cache_dir: Path) -> Path:
     """Clone or update a git repository into the cache."""
-    # Create a stable directory name from the URL
-    safe_name = url.replace("://", "_").replace("/", "_").replace(".", "_")
-    repo_dir = cache_dir / "git" / safe_name
+    repo_dir = _git_repo_dir(url, cache_dir)
 
     try:
         if repo_dir.exists():
@@ -115,12 +131,7 @@ def _resolve_git(url: str, ref: str, cache_dir: Path) -> Path:
             "git is not installed or not in PATH"
         )
 
-    # Look for processes/ subdirectory
-    processes_dir = repo_dir / "processes"
-    if processes_dir.is_dir():
-        return processes_dir
-
-    return repo_dir
+    return _git_processes_dir(repo_dir)
 
 
 def _git_clone(url: str, ref: str, target: Path) -> None:

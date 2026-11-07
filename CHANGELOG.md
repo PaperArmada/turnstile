@@ -9,6 +9,45 @@ described in [STABILITY.md](STABILITY.md).
 
 ### Changed
 
+- **`turnstile update` is a safe one-step upgrade (#47).** It compares
+  `.processes/` with the starters bundled in the installed CLI's release
+  instead of cloning the repo's default branch (`--repo`, `--ref` and
+  `--dev` still select another source), and shows a plan; `--apply`
+  carries it out.
+  - Only unedited copies are replaced: their content is recorded in the
+    new `.processes/.starters.lock` manifest (written by `init`, meant to
+    be committed) or matches a starter shipped by an earlier release.
+  - Kept unless forced with `--force NAME`: edited copies, copies newer
+    than the source, new starters whose filename another file uses, new
+    starters an `extends` source that cannot be read may provide, and
+    writes that would leave an active instance without its definition or
+    state. `--diff` shows what they would change. A forced write that
+    strands an instance reports it.
+  - Before writing, the loader is run in a scratch directory over the
+    files as they would be afterwards, including the `registry.yaml`
+    edit. A write that would leave the definitions unloadable is held
+    back even when forced; when no write can be held back to make the
+    result load, `--apply` refuses and exits 1.
+  - `--apply` fetches git `extends` sources first, as any command that
+    loads the definitions does; the preview does not fetch, and says
+    when it could not check the plan for that reason. When another
+    `extends` source cannot be read (a Python package this CLI cannot
+    import, or a missing path) or the loader would read a file that is
+    not readable text, `--apply` refuses rather than write unchecked.
+  - With a manifest, starters deleted locally are not reinstalled
+    (`--force NAME` reinstalls one); starters an `extends` source
+    supplies are not copied. New starters are added to `registry.yaml`;
+    an existing file left out of its `local:` list is updated but stays
+    out.
+  - `--apply` writes the definitions, the manifest and the registry edit
+    all together or not at all. Definition files that are, or are reached
+    through, a symbolic link, or that this user cannot write, are kept; a
+    linked `registry.yaml` is never edited.
+  - With the bundled source, `--apply` re-pins `.mcp.json` and
+    `.claude/settings.json` from an older release tag of the turnstile
+    repo to this release; forks, branches, commits and newer tags are
+    left alone and reported.
+
 - **A blank parameter value counts as not provided (#51).** An empty or
   whitespace-only value is replaced by the parameter's default when it has
   one, and a blank required parameter is refused as missing. This applies
